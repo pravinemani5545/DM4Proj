@@ -287,6 +287,14 @@ namespace ns3 {
      * 3. Processing TX and RX buffers
      */
     void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
+        // Add cycle limit check at the start
+        if (cpuCoreGenerator->m_cpuCycle >= 400) {
+            cpuCoreGenerator->m_cpuCoreSimDone = true;
+            std::cout << "\n[CPU] ========== Reached cycle limit (200) ==========" << std::endl;
+            Logger::getLogger()->traceEnd(cpuCoreGenerator->m_coreId);
+            return;
+        }
+
         // Update ROB cycle
         if (cpuCoreGenerator->m_rob) {
             cpuCoreGenerator->m_rob->setCycle(cpuCoreGenerator->m_cpuCycle);
