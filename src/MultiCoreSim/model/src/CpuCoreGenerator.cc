@@ -59,6 +59,7 @@ namespace ns3 {
         m_lsq->setROB(m_rob);
         m_rob->setLSQ(m_lsq);
         m_lsq->setCpuFIFO(m_cpuFIFO);
+        m_rob->setCpu(this);
     }
 
     CpuCoreGenerator::~CpuCoreGenerator() {
@@ -307,7 +308,6 @@ namespace ns3 {
                         std::cout << "[CPU] Successfully allocated " 
                                   << (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ ? "LOAD" : "STORE")
                                   << " to ROB and LSQ" << std::endl;
-                        m_sent_requests++;  // Only track memory operations
                         m_newSampleRdy = false;
                     }
                 }

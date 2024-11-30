@@ -128,6 +128,7 @@ void LSQ::pushToCache() {
                       
             entry.waitingForCache = true;
             m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
+            m_rob->getCpu()->notifyRequestSentToCache();  // Notify CPU when request is sent
             break;
         }
         // Also send loads that weren't satisfied by forwarding
@@ -140,6 +141,7 @@ void LSQ::pushToCache() {
                       
             entry.waitingForCache = true;
             m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
+            m_rob->getCpu()->notifyRequestSentToCache();  // Notify CPU when request is sent
             break;
         }
     }

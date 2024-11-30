@@ -105,6 +105,12 @@ public:
         std::cout << "[CPU] Instruction " << request.msgId << " retired, in-flight: " 
                   << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
     }
+    
+    void notifyRequestSentToCache() { 
+        m_sent_requests++;  // Track when request is actually sent to cache
+        std::cout << "[CPU] Request sent to cache, in-flight: " 
+                  << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
+    }
 };
 
 } // namespace ns3

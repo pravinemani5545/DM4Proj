@@ -50,21 +50,15 @@ public:
     void commit(uint64_t requestId); // Handle operation completion
     
     // Memory system interface (3.3)
-    void pushToCache();           // Send store to cache
-    void rxFromCache();           // Handle cache response
+    void pushToCache();           // Send requests to cache
+    void rxFromCache();           // Handle cache responses
+    
+    // Configuration
+    void setCycle(uint64_t cycle) { m_current_cycle = cycle; }
+    void setROB(ROB* rob) { m_rob = rob; }
+    void setCpuFIFO(CpuFIFO* fifo) { m_cpuFIFO = fifo; }
     
     // Utility functions
-    void setCpuFIFO(CpuFIFO* fifo) { 
-        m_cpuFIFO = fifo;
-        std::cout << "[LSQ] CPU FIFO connection established" << std::endl;
-    }
-    
-    void setROB(ROB* rob) { 
-        m_rob = rob;
-        std::cout << "[LSQ] ROB connection established" << std::endl;
-    }
-    
-    void setCycle(uint64_t cycle) { m_current_cycle = cycle; }
     bool isEmpty() const { return m_lsq_q.empty(); }
     uint32_t size() const { return m_num_entries; }
     
