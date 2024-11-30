@@ -5,7 +5,8 @@
 namespace ns3 {
 
 ROB::ROB() 
-    : m_num_entries(0), 
+    : m_rob_q(),
+      m_num_entries(0),
       m_lsq(nullptr),
       m_cpu(nullptr),
       m_current_cycle(0) {
@@ -14,6 +15,19 @@ ROB::ROB()
 }
 
 ROB::~ROB() {}
+
+void ROB::printState() const {
+    std::cout << "\n[ROB] Current State:" << std::endl;
+    std::cout << "  Entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
+    std::cout << "  Queue contents:" << std::endl;
+    for (size_t i = 0; i < m_rob_q.size(); i++) {
+        const auto& entry = m_rob_q[i];
+        std::cout << "    [" << i << "] ID: " << entry.request.msgId
+                  << " Type: " << (int)entry.request.type
+                  << " Ready: " << (entry.ready ? "Yes" : "No")
+                  << " Cycle: " << entry.allocate_cycle << std::endl;
+    }
+}
 
 void ROB::step() {
     std::cout << "\n[ROB] ========== Step at cycle " << m_current_cycle << " ==========" << std::endl;
