@@ -222,14 +222,17 @@ namespace ns3 {
             m_prevReqFinishCycle = m_cpuCycle;
             m_prevReqArriveCycle = m_cpuMemResp.reqcycle;
             m_cpuRespCnt++;
+            
+            // Try retiring instructions after receiving response
+            ProcessROB();
         }
 
         // Process ROB and LSQ
-        ProcessROB();
-        ProcessLSQ();
+        ProcessLSQ();  // Do LSQ first to enable forwarding
+        ProcessROB();  // Then try retiring
  
         // Schedule next run or finish simulation
-        if (m_cpuReqDone == true && m_cpuRespCnt >= m_cpuReqCnt) {
+        if (m_cpuReqDone == true && m_sent_requests == 0 && m_rob->isEmpty() && m_lsq->isEmpty()) {
             m_cpuCoreSimDone = true;
             Logger::getLogger()->traceEnd(this->m_coreId);
             std::cout << "Cpu " << m_coreId << " Simulation End @ processor cycle # " << m_cpuCycle << std::endl;
@@ -241,35 +244,76 @@ namespace ns3 {
     }
 
     void CpuCoreGenerator::ProcessROB() {
-        // Try to retire instructions from ROB
-        while (m_rob->retire()) {
-            // Successfully retired an instruction
-            if (m_logFileGenEnable) {
-                std::cout << "Cpu " << m_coreId << " retired instruction at cycle " << m_cpuCycle << std::endl;
+        // Only try to retire if we have instructions and the head is ready
+        if (!m_rob->isEmpty()) {
+            const ROB::ROBEntry& head = m_rob->getHead();
+            
+            // For memory operations, need LSQ to be ready too
+            if (head.request.type != CpuFIFO::REQTYPE::COMPUTE) {
+                if (!m_lsq->isEmpty()) {
+                    // Ensure LSQ head matches ROB head for memory operations
+                    CpuFIFO::ReqMsg dummyReq;
+                    if (head.ready && m_lsq->retire(dummyReq)) {
+                        m_rob->retire();
+                        if (m_logFileGenEnable) {
+                            std::cout << "Cpu " << m_coreId << " retired memory instruction at cycle " << m_cpuCycle << std::endl;
+                        }
+                    }
+                }
+            } else if (head.ready) {
+                // Compute instructions can retire directly from ROB
+                m_rob->retire();
+                if (m_logFileGenEnable) {
+                    std::cout << "Cpu " << m_coreId << " retired compute instruction at cycle " << m_cpuCycle << std::endl;
+                }
             }
         }
     }
 
     void CpuCoreGenerator::ProcessLSQ() {
-        // Process store-to-load forwarding
-        if (!m_lsq->isEmpty()) {
-            const CpuFIFO::ReqMsg& topReq = m_rob->getHead().request;
-            // Only check forwarding for non-ready loads
-            if (topReq.type == CpuFIFO::REQTYPE::READ && !topReq.ready) {
-                if (m_lsq->hasStore(topReq.addr) && m_lsq->ldFwd(topReq.addr)) {
-                    // Forward the data and mark as ready
-                    m_lsq->commit(topReq.msgId);
-                    m_rob->commit(topReq.msgId);  // Also mark as ready in ROB
+        // Process store-to-load forwarding for all loads in ROB
+        std::queue<ROB::ROBEntry> temp;
+        bool found_ready = false;
+        
+        while (!m_rob->isEmpty()) {
+            const ROB::ROBEntry& entry = m_rob->getHead();
+            m_rob->retire();  // Remove temporarily
+            
+            // Check if this is an unready load that could benefit from forwarding
+            if (entry.request.type == CpuFIFO::REQTYPE::READ && !entry.ready) {
+                if (m_lsq->hasStore(entry.request.addr)) {
+                    if (m_lsq->ldFwd(entry.request.addr)) {
+                        // Store is ready, can forward data
+                        ROB::ROBEntry updated = entry;
+                        updated.ready = true;
+                        temp.push(updated);
+                        found_ready = true;
+                        
+                        if (m_logFileGenEnable) {
+                            std::cout << "Cpu " << m_coreId << " forwarded store to load at cycle " << m_cpuCycle << std::endl;
+                        }
+                        continue;
+                    }
                 }
             }
+            
+            // No forwarding possible, just keep the entry as is
+            temp.push(entry);
         }
-
-        // Try to retire memory operations from LSQ
-        CpuFIFO::ReqMsg dummyReq;  // Used for retire call
-        while (m_lsq->retire(dummyReq)) {
-            if (m_logFileGenEnable) {
-                std::cout << "Cpu " << m_coreId << " retired memory operation at cycle " << m_cpuCycle << std::endl;
+        
+        // Restore ROB with potentially updated entries
+        while (!temp.empty()) {
+            ROB::ROBEntry entry = temp.front();
+            temp.pop();
+            m_rob->allocate(entry.request);  // This will maintain the order
+            if (entry.ready) {
+                m_rob->commit(entry.request.msgId);
             }
+        }
+        
+        // If we found any ready loads through forwarding, try retiring again
+        if (found_ready) {
+            ProcessROB();
         }
     }
 
