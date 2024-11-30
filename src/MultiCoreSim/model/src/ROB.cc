@@ -1,11 +1,13 @@
 #include "../header/ROB.h"
 #include "../header/LSQ.h"
+#include "../header/CpuCoreGenerator.h"
 
 namespace ns3 {
 
 ROB::ROB() 
     : m_num_entries(0), 
       m_lsq(nullptr),
+      m_cpu(nullptr),
       m_current_cycle(0) {
     m_rob_q.reserve(MAX_ENTRIES);
     std::cout << "[ROB] Initialized with " << MAX_ENTRIES << " entries capacity" << std::endl;
