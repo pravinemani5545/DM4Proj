@@ -167,11 +167,9 @@ namespace ns3 {
         if (m_remaining_compute > 0) {
             std::cout << "[CPU] Processing compute instructions (" 
                       << m_remaining_compute << " remaining)" << std::endl;
-                  
-            // Try to allocate as many compute instructions as possible
-            while (m_remaining_compute > 0 && m_rob && m_rob->canAccept() && 
-                   m_sent_requests < m_number_of_OoO_requests) {
-                
+              
+            // Try to allocate ONE compute instruction this cycle
+            if (m_rob && m_rob->canAccept() && m_sent_requests < m_number_of_OoO_requests) {
                 std::cout << "[CPU] Attempting to allocate compute instruction:" << std::endl;
                 std::cout << "[CPU] - Remaining compute: " << m_remaining_compute << std::endl;
                 std::cout << "[CPU] - In-flight requests: " << m_sent_requests << "/" 
@@ -192,6 +190,7 @@ namespace ns3 {
                 // Try to allocate in ROB
                 if (m_rob->allocate(compute_req)) {
                     m_remaining_compute--;
+                    m_sent_requests++;  // Track compute instruction as in-flight
                     std::cout << "[CPU] Successfully allocated compute instruction " 
                               << compute_req.msgId << " (ready immediately)" << std::endl;
                     std::cout << "[CPU] Updated state:" << std::endl;
@@ -200,7 +199,6 @@ namespace ns3 {
                               << m_number_of_OoO_requests << std::endl;
                 } else {
                     std::cout << "[CPU] ROB allocation failed, will retry next cycle" << std::endl;
-                    break;  // ROB is full, try again next cycle
                 }
             }
             
@@ -274,7 +272,9 @@ namespace ns3 {
         
         // Try to allocate memory instruction if we have one
         if (m_newSampleRdy) {
-            if (m_rob && m_lsq && m_rob->canAccept() && m_lsq->canAccept()) {
+            if (m_rob && m_lsq && m_rob->canAccept() && m_lsq->canAccept() && 
+                m_sent_requests < m_number_of_OoO_requests) {
+                
                 // For loads, check store-to-load forwarding first
                 if (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ) {
                     bool forwarded = m_lsq->ldFwd(m_cpuMemReq.addr);
@@ -298,9 +298,12 @@ namespace ns3 {
                         m_rob->removeLastEntry();  // Rollback ROB allocation
                         std::cout << "[CPU] LSQ allocation failed - rolled back ROB allocation" << std::endl;
                     } else {
+                        m_sent_requests++;  // Track memory request as in-flight
                         std::cout << "[CPU] Successfully allocated " 
                                   << (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ ? "LOAD" : "STORE")
                                   << " to ROB and LSQ" << std::endl;
+                        std::cout << "[CPU] Updated in-flight requests: " << m_sent_requests 
+                                  << "/" << m_number_of_OoO_requests << std::endl;
                         m_newSampleRdy = false;
                     }
                 }
@@ -320,7 +323,13 @@ namespace ns3 {
         if (!m_cpuFIFO->m_rxFIFO.IsEmpty()) {
             m_cpuMemResp = m_cpuFIFO->m_rxFIFO.GetFrontElement();
             m_cpuFIFO->m_rxFIFO.PopElement();
-            m_sent_requests--;
+            
+            // Protect against underflow
+            if (m_sent_requests > 0) {
+                m_sent_requests--;
+            } else {
+                std::cout << "[CPU] Warning: m_sent_requests underflow prevented" << std::endl;
+            }
             
             // For loads: mark as ready in ROB and LSQ
             // For stores: remove from LSQ (write confirmed)

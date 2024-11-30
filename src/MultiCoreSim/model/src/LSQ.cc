@@ -114,14 +114,24 @@ bool LSQ::ldFwd(uint64_t address) {
 }
 
 void LSQ::pushToCache() {
+    // Check FIFO availability first
+    if (!m_cpuFIFO || m_cpuFIFO->m_txFIFO.IsFull()) {
+        std::cout << "[LSQ] Cannot push to cache - FIFO full or not connected" << std::endl;
+        return;
+    }
+
     // Check for store operations ready to be sent to cache
     for (auto& entry : m_lsq_q) {
         if (entry.request.type == CpuFIFO::REQTYPE::WRITE && !entry.waitingForCache) {
             // Send store to cache
             entry.waitingForCache = true;
+            m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
             if (m_rob && m_rob->getCpu()) {
-                m_rob->getCpu()->notifyRequestSentToCache();  // Notify CPU when request is sent
+                m_rob->getCpu()->notifyRequestSentToCache();
             }
+            std::cout << "[LSQ] Sent store request " << entry.request.msgId 
+                      << " to cache (addr=0x" << std::hex << entry.request.addr 
+                      << std::dec << ")" << std::endl;
             return;  // Only send one request per cycle
         }
     }
@@ -131,16 +141,23 @@ void LSQ::pushToCache() {
         if (entry.request.type == CpuFIFO::REQTYPE::READ && !entry.waitingForCache) {
             // Send load to cache
             entry.waitingForCache = true;
+            m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
             if (m_rob && m_rob->getCpu()) {
-                m_rob->getCpu()->notifyRequestSentToCache();  // Notify CPU when request is sent
+                m_rob->getCpu()->notifyRequestSentToCache();
             }
+            std::cout << "[LSQ] Sent load request " << entry.request.msgId 
+                      << " to cache (addr=0x" << std::hex << entry.request.addr 
+                      << std::dec << ")" << std::endl;
             return;  // Only send one request per cycle
         }
     }
 }
 
 void LSQ::rxFromCache() {
-    if (!m_cpuFIFO || m_cpuFIFO->m_rxFIFO.IsEmpty()) return;
+    // Check FIFO availability first
+    if (!m_cpuFIFO || m_cpuFIFO->m_rxFIFO.IsEmpty()) {
+        return;
+    }
     
     auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
     m_cpuFIFO->m_rxFIFO.PopElement();
@@ -151,7 +168,6 @@ void LSQ::rxFromCache() {
     // Find matching request in LSQ
     for (auto& entry : m_lsq_q) {
         if (entry.request.msgId == response.msgId) {
-            // As per 3.3.3 case 1: Load commits when data comes back from memory
             if (entry.request.type == CpuFIFO::REQTYPE::READ) {
                 entry.ready = true;
                 std::cout << "[LSQ] Load data received from memory, marking ready" << std::endl;
@@ -161,9 +177,7 @@ void LSQ::rxFromCache() {
                 
                 // After receiving load data, check if any other loads can be forwarded
                 ldFwd(entry.request.addr);
-            } 
-            // For stores, just mark that cache has acknowledged the write
-            else {
+            } else {
                 entry.cache_ack = true;
                 std::cout << "[LSQ] Store write acknowledged by cache" << std::endl;
             }
