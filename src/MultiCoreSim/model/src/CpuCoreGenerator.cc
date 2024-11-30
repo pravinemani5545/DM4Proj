@@ -349,35 +349,29 @@ namespace ns3 {
     void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
         std::cout << "\n[CPU] ========== Cycle " << cpuCoreGenerator->m_cpuCycle << " ==========" << std::endl;
         
-        // 1. ROB retirement must happen first (3.4)
+        // Update ROB cycle
         if (cpuCoreGenerator->m_rob) {
-            cpuCoreGenerator->m_rob->step();  // ROB checks from top and retires ready instructions
-            cpuCoreGenerator->m_rob->printState();
+            cpuCoreGenerator->m_rob->setCycle(cpuCoreGenerator->m_cpuCycle);
+            cpuCoreGenerator->m_rob->step();
         }
         
-        // 2. LSQ operations (3.4.1)
+        // Update LSQ cycle
         if (cpuCoreGenerator->m_lsq) {
-            // Handle LSQ entry removal based on:
-            // - Stores: when cache write confirmed
-            // - Loads: when ready (forwarding or memory)
+            cpuCoreGenerator->m_lsq->setCycle(cpuCoreGenerator->m_cpuCycle);
             cpuCoreGenerator->m_lsq->step();
             
             // First handle any cache responses
             if (cpuCoreGenerator->m_cpuFIFO && !cpuCoreGenerator->m_cpuFIFO->m_rxFIFO.IsEmpty()) {
                 cpuCoreGenerator->m_lsq->rxFromCache();
-                std::cout << "[CPU] LSQ processed cache response" << std::endl;
             }
             
             // Then try to send stores to cache
             if (cpuCoreGenerator->m_cpuFIFO && !cpuCoreGenerator->m_cpuFIFO->m_txFIFO.IsFull()) {
                 cpuCoreGenerator->m_lsq->pushToCache();
-                std::cout << "[CPU] LSQ attempting to send store to cache" << std::endl;
             }
-            
-            cpuCoreGenerator->m_lsq->printState();
         }
         
-        // 3. Process new instructions
+        // Process new instructions
         cpuCoreGenerator->ProcessTxBuf();
         cpuCoreGenerator->ProcessRxBuf();
     }

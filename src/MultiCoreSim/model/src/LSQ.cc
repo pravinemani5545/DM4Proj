@@ -1,5 +1,5 @@
-#include "LSQ.h"
-#include "ROB.h"
+#include "../header/LSQ.h"
+#include "../header/ROB.h"
 
 namespace ns3 {
 
