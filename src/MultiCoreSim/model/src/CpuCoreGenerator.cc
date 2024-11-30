@@ -148,15 +148,28 @@ namespace ns3 {
      * - Mark ready status appropriately
      */
     void CpuCoreGenerator::ProcessTxBuf() {
-        std::cout << "\n[CPU] Core " << m_coreId << " Cycle " << m_cpuCycle << std::endl;
+        if (m_cpuCycle >= 60) {
+            std::cout << "\n[CPU] ========== Reached cycle limit (60) ==========" << std::endl;
+            std::cout << "[CPU] Final pipeline state:" << std::endl;
+            std::cout << "[CPU] - In-flight requests: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
+            std::cout << "[CPU] - Remaining compute: " << m_remaining_compute << std::endl;
+            std::cout << "[CPU] - Request count: " << m_cpuReqCnt << std::endl;
+            std::cout << "[CPU] - Response count: " << m_cpuRespCnt << std::endl;
+            m_cpuCoreSimDone = true;
+            return;
+        }
+
+        std::cout << "\n[CPU] ========== Core " << m_coreId << " Cycle " << m_cpuCycle << " ==========" << std::endl;
+        std::cout << "[CPU] Pipeline state:" << std::endl;
+        std::cout << "[CPU] - In-flight requests: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
+        std::cout << "[CPU] - Remaining compute: " << m_remaining_compute << std::endl;
+        std::cout << "[CPU] - Request count: " << m_cpuReqCnt << std::endl;
+        std::cout << "[CPU] - Response count: " << m_cpuRespCnt << std::endl;
         
         // First check LSQ for stores ready to commit to cache
         if (m_lsq && m_cpuFIFO && !m_cpuFIFO->m_txFIFO.IsFull()) {
             m_lsq->pushToCache();
         }
-        
-        std::cout << "[CPU] In-flight requests: " << m_sent_requests << "/" 
-                  << m_number_of_OoO_requests << std::endl;
         
         // First handle any remaining compute instructions from previous line
         if (m_remaining_compute > 0) {
@@ -166,6 +179,12 @@ namespace ns3 {
             // Try to allocate as many compute instructions as possible
             while (m_remaining_compute > 0 && m_rob && m_rob->canAccept() && 
                    m_sent_requests < m_number_of_OoO_requests) {
+                
+                std::cout << "[CPU] Attempting to allocate compute instruction:" << std::endl;
+                std::cout << "[CPU] - Remaining compute: " << m_remaining_compute << std::endl;
+                std::cout << "[CPU] - In-flight requests: " << m_sent_requests << "/" 
+                          << m_number_of_OoO_requests << std::endl;
+                
                 // Create compute instruction request
                 CpuFIFO::ReqMsg compute_req;
                 compute_req.msgId = m_cpuReqCnt++;
@@ -175,20 +194,29 @@ namespace ns3 {
                 compute_req.cycle = m_cpuCycle;
                 compute_req.ready = true;  // Compute instructions are ready immediately
                 
+                std::cout << "[CPU] Created compute request " << compute_req.msgId 
+                          << " at cycle " << m_cpuCycle << std::endl;
+                
                 // Try to allocate in ROB
                 if (m_rob->allocate(compute_req)) {
                     m_remaining_compute--;
                     m_sent_requests++;
-                    std::cout << "[CPU] Allocated compute instruction " 
+                    std::cout << "[CPU] Successfully allocated compute instruction " 
                               << compute_req.msgId << " (ready immediately)" << std::endl;
+                    std::cout << "[CPU] Updated state:" << std::endl;
+                    std::cout << "[CPU] - Remaining compute: " << m_remaining_compute << std::endl;
+                    std::cout << "[CPU] - In-flight requests: " << m_sent_requests << "/" 
+                              << m_number_of_OoO_requests << std::endl;
                 } else {
-                    std::cout << "[CPU] ROB full, will continue compute allocation next cycle" << std::endl;
+                    std::cout << "[CPU] ROB allocation failed, will retry next cycle" << std::endl;
                     break;  // ROB is full, try again next cycle
                 }
             }
             
             // If we still have compute instructions, return and try again next cycle
             if (m_remaining_compute > 0) {
+                std::cout << "[CPU] Still have " << m_remaining_compute 
+                          << " compute instructions remaining, will continue next cycle" << std::endl;
                 return;
             }
         }

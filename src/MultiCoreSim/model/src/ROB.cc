@@ -14,11 +14,43 @@ ROB::ROB()
 ROB::~ROB() {}
 
 void ROB::step() {
-    std::cout << "\n[ROB] Step at cycle " << m_current_cycle << std::endl;
+    // Add cycle limit check
+    if (m_current_cycle >= 60) {
+        std::cout << "\n[ROB] ========== Final state at cycle limit (60) ==========" << std::endl;
+        std::cout << "[ROB] Final ROB state:" << std::endl;
+        std::cout << "[ROB] Current entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
+        
+        if (!m_rob_q.empty()) {
+            std::cout << "[ROB] Final ROB queue contents:" << std::endl;
+            for (size_t i = 0; i < m_rob_q.size(); i++) {
+                const ROBEntry& entry = m_rob_q[i];
+                std::cout << "[ROB]   [" << i << "] msgId=" << entry.request.msgId 
+                          << " type=" << (int)entry.request.type
+                          << " ready=" << entry.ready 
+                          << " cycle=" << entry.allocate_cycle << std::endl;
+            }
+        }
+        return;
+    }
+
+    std::cout << "\n[ROB] ========== Step at cycle " << m_current_cycle << " ==========" << std::endl;
     std::cout << "[ROB] Current entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
+    
+    // Print current ROB state
+    if (!m_rob_q.empty()) {
+        std::cout << "[ROB] Current ROB queue state:" << std::endl;
+        for (size_t i = 0; i < m_rob_q.size(); i++) {
+            const ROBEntry& entry = m_rob_q[i];
+            std::cout << "[ROB]   [" << i << "] msgId=" << entry.request.msgId 
+                      << " type=" << (int)entry.request.type
+                      << " ready=" << entry.ready 
+                      << " cycle=" << entry.allocate_cycle << std::endl;
+        }
+    }
     
     // As per 3.4, retire instructions every cycle
     retire();
+    m_current_cycle++;
 }
 
 bool ROB::canAccept() {
@@ -46,7 +78,8 @@ bool ROB::allocate(const CpuFIFO::ReqMsg& request) {
     
     std::cout << "[ROB] Allocated entry for request " << request.msgId 
               << " type=" << (int)request.type 
-              << " ready=" << entry.ready << std::endl;
+              << " ready=" << entry.ready 
+              << " at cycle " << m_current_cycle << std::endl;
     return true;
 }
 
@@ -56,6 +89,8 @@ void ROB::retire() {
         return;
     }
     
+    std::cout << "[ROB] Starting retirement at cycle " << m_current_cycle << std::endl;
+    
     // As per 3.4: ROB is the only class architecturally retiring instructions
     // Must maintain program order, so check from top of ROB queue
     uint32_t retired = 0;
@@ -63,6 +98,11 @@ void ROB::retire() {
     // Keep retiring until we hit IPC limit or a non-ready instruction
     while (!m_rob_q.empty() && retired < IPC) {
         ROBEntry& head = m_rob_q.front();
+        
+        std::cout << "[ROB] Examining head entry: msgId=" << head.request.msgId 
+                  << " type=" << (int)head.request.type
+                  << " ready=" << head.ready 
+                  << " allocated at cycle " << head.allocate_cycle << std::endl;
         
         // Stop at first non-ready instruction to maintain program order
         if (!head.ready) {
@@ -73,7 +113,8 @@ void ROB::retire() {
         
         std::cout << "[ROB] Architecturally retiring request " << head.request.msgId 
                   << " type=" << (int)head.request.type 
-                  << " allocated at cycle " << head.allocate_cycle << std::endl;
+                  << " allocated at cycle " << head.allocate_cycle 
+                  << " retired at cycle " << m_current_cycle << std::endl;
         
         // For stores, notify LSQ that store can be written to cache
         if (head.request.type == CpuFIFO::REQTYPE::WRITE && m_lsq) {
@@ -94,6 +135,8 @@ void ROB::retire() {
         std::cout << "[ROB] Architecturally retired " << retired << " instructions this cycle" 
                   << ", remaining entries: " << m_num_entries << std::endl;
     }
+    
+    std::cout << "[ROB] Retirement complete for cycle " << m_current_cycle << std::endl;
 }
 
 void ROB::commit(uint64_t requestId) {
