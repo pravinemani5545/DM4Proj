@@ -1,57 +1,108 @@
-#ifndef _LSQ_H
-#define _LSQ_H
+#ifndef LSQ_H
+#define LSQ_H
 
-#include "ns3/object.h"
-#include "ns3/ptr.h"
-#include "ns3/type-id.h"
 #include "MemTemplate.h"
-#include <queue>
-#include <unordered_map>
-#include <cstdint>
+#include <vector>
 
 namespace ns3 {
 
-class LSQ : public ns3::Object {
+/**
+ * @brief Load Store Queue (LSQ) implementation for Out-of-Order execution
+ * 
+ * The LSQ handles memory operations (loads and stores) in an out-of-order processor.
+ * It maintains program order for memory operations while allowing out-of-order execution
+ * and implements store-to-load forwarding for memory disambiguation.
+ */
+class LSQ {
 private:
+    /**
+     * @brief Entry in the LSQ containing a memory request and its status
+     */
     struct LSQEntry {
-        CpuFIFO::ReqMsg request;
-        bool ready;
-        uint64_t id;
+        CpuFIFO::ReqMsg request;    // Memory request details
+        bool ready;                  // True when operation is complete (data received for loads, store committed)
+        bool waitingForCache;        // True when waiting for cache response
     };
-
-    std::queue<LSQEntry> queue;
-    std::unordered_map<uint64_t, LSQEntry*> addressMap;  // Maps addresses to store entries
-    uint32_t maxSize;
+    
+    uint32_t MAX_ENTRIES;           // Maximum number of entries in LSQ
+    uint32_t num_entries;           // Current number of entries
+    std::vector<LSQEntry> lsq_q;    // Queue storing LSQ entries
+    CpuFIFO* m_cpuFIFO;            // Interface to CPU FIFO for cache communication
 
 public:
-    static TypeId GetTypeId(void);
-    
     LSQ();
-    LSQ(uint32_t size);
     ~LSQ();
+    
+    /**
+     * @brief Called every cycle to process LSQ operations
+     * Handles pushing stores to cache and receiving load responses
+     */
+    void step();
 
-    // Core functionality
-    bool isFull() const;
-    bool isEmpty() const;
+    /**
+     * @brief Checks if LSQ can accept a new entry
+     * @return true if LSQ has space for new entry
+     */
+    bool canAccept();
+
+    /**
+     * @brief Allocates a new entry in LSQ
+     * @param request Memory request to allocate
+     * @return true if allocation successful
+     */
     bool allocate(const CpuFIFO::ReqMsg& request);
-    bool retire(const CpuFIFO::ReqMsg& request);
-    
-    // Load-Store Queue specific
-    bool hasStore(uint64_t address) const;
-    void pushToCache();
-    void rxFromCache();
-    bool ldFwd(uint64_t address) const;  // Load forwarding from youngest matching store
-    bool checkLoadStore(const CpuFIFO::ReqMsg& load) const;  // Check all stores for a load
-    bool canExecute(const CpuFIFO::ReqMsg& req) const;  // Check if operation can execute
-    
-    // Commit handling
+
+    /**
+     * @brief Retires completed memory operations
+     * - Loads are retired when data is received or forwarded
+     * - Stores are retired when cache confirms write complete
+     */
+    void retire();
+
+    /**
+     * @brief Implements store-to-load forwarding
+     * @param address Memory address to check for forwarding
+     * @return true if forwarding occurred
+     */
+    bool ldFwd(uint64_t address);
+
+    /**
+     * @brief Marks a request as complete/ready
+     * @param requestId ID of request to commit
+     */
     void commit(uint64_t requestId);
-    
-    // Getters
-    uint32_t size() const;
-    uint32_t getMaxSize() const;
+
+    /**
+     * @brief Pushes oldest store operation to cache
+     * Called during step() to handle store operations
+     */
+    void pushToCache();
+
+    /**
+     * @brief Processes responses from cache
+     * Called during step() to handle load responses
+     */
+    void rxFromCache();
+
+    /**
+     * @brief Sets the CPU FIFO interface for cache communication
+     * @param fifo Pointer to CPU FIFO
+     */
+    void setCpuFIFO(CpuFIFO* fifo) { m_cpuFIFO = fifo; }
+
+    /**
+     * @brief Checks if LSQ is empty
+     * @return true if no entries in LSQ
+     */
+    bool isEmpty() const { return lsq_q.empty(); }
+
+    /**
+     * @brief Gets current number of entries in LSQ
+     * @return Number of entries
+     */
+    uint32_t size() const { return num_entries; }
 };
 
 } // namespace ns3
 
-#endif // _LSQ_H
+#endif // LSQ_H

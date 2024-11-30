@@ -1,51 +1,93 @@
-#ifndef _ROB_H
-#define _ROB_H
+#ifndef ROB_H
+#define ROB_H
 
-#include "ns3/object.h"
-#include "ns3/ptr.h"
-#include "ns3/type-id.h"
 #include "MemTemplate.h"
-#include <queue>
-#include <cstdint>
+#include <vector>
 
 namespace ns3 {
 
-class ROB : public ns3::Object {
+/**
+ * @brief Reorder Buffer (ROB) implementation for Out-of-Order execution
+ * 
+ * The ROB maintains program order while allowing out-of-order execution.
+ * It ensures instructions commit in-order while allowing execution to complete
+ * out-of-order. This preserves precise interrupts and correct program behavior.
+ */
+class ROB {
 private:
+    /**
+     * @brief Entry in the ROB containing an instruction and its status
+     */
     struct ROBEntry {
-        CpuFIFO::ReqMsg request;
-        bool ready;
-        uint64_t id;
+        CpuFIFO::ReqMsg request;    // Instruction details
+        bool ready;                  // True when instruction has completed execution
     };
-
-    std::queue<ROBEntry> buffer;
-    uint32_t maxSize;
-    uint64_t nextId;
+    
+    const uint32_t MAX_ENTRIES = 128;  // Maximum number of ROB entries
+    const uint32_t IPC = 4;            // Instructions retired per cycle
+    uint32_t num_entries;              // Current number of entries
+    std::vector<ROBEntry> rob_q;       // Queue storing ROB entries
 
 public:
-    static TypeId GetTypeId(void);
-    
     ROB();
-    ROB(uint32_t size);
-    ~ROB() = default;
+    ~ROB();
+    
+    /**
+     * @brief Called every cycle to process ROB operations
+     * Handles instruction retirement and updates ROB state
+     */
+    void step();
 
-    // Core functionality
-    bool isFull() const;
-    bool isEmpty() const;
+    /**
+     * @brief Checks if ROB can accept a new entry
+     * @return true if ROB has space for new entry
+     */
+    bool canAccept();
+
+    /**
+     * @brief Allocates a new entry in ROB
+     * @param request Instruction to allocate
+     * @return true if allocation successful
+     * 
+     * For compute instructions: marked ready immediately
+     * For memory operations: marked ready when LSQ signals completion
+     */
     bool allocate(const CpuFIFO::ReqMsg& request);
-    bool retire();
+
+    /**
+     * @brief Retires completed instructions in program order
+     * 
+     * - Can retire up to IPC instructions per cycle
+     * - Only retires instructions from head of ROB
+     * - Only retires instructions marked as ready
+     * - Stops at first non-ready instruction
+     */
+    void retire();
+
+    /**
+     * @brief Marks an instruction as complete/ready
+     * @param requestId ID of instruction to commit
+     * 
+     * Called when:
+     * - Compute instruction allocated (immediate)
+     * - Store instruction allocated (immediate)
+     * - Load instruction receives data from cache or LSQ forwarding
+     */
     void commit(uint64_t requestId);
-    
-    // Getters
-    uint32_t size() const;
-    uint32_t getMaxSize() const;
-    
-    // Entry information access
-    bool isHeadReady() const;
-    const CpuFIFO::ReqMsg& getHeadRequest() const;
-    uint64_t getHeadId() const;
+
+    /**
+     * @brief Checks if ROB is empty
+     * @return true if no entries in ROB
+     */
+    bool isEmpty() const { return rob_q.empty(); }
+
+    /**
+     * @brief Gets current number of entries in ROB
+     * @return Number of entries
+     */
+    uint32_t size() const { return num_entries; }
 };
 
 } // namespace ns3
 
-#endif // _ROB_H
+#endif // ROB_H

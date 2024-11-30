@@ -4,6 +4,7 @@
  * Email :      salahga@mcmaster.ca
  *
  * Created On February 16, 2020
+ * Modified for Out-of-Order execution support
  */
 #ifndef _CpuCoreGenerator_H
 #define _CpuCoreGenerator_H
@@ -23,128 +24,129 @@
 
 namespace ns3 { 
   /**
-   * brief CpuCoreGenerator Implements processor read/write activities
-   * according to specific brenchmark, the messages are generated in a   
-   * real time fashion according to the cycle value in benchmark file.
-   * CpuCoreGenerator interface with Cache Controller through two buffers
-   * The Req/Resp Buffers.
-  */
-
+   * @brief CPU Core Generator with Out-of-Order execution support
+   * 
+   * Implements processor instruction execution according to a benchmark trace.
+   * Instructions are processed out-of-order using ROB and LSQ while maintaining
+   * program order for commits. The generator interfaces with the Cache Controller
+   * through request/response buffers.
+   * 
+   * Key features:
+   * - Reads benchmark trace with compute and memory instructions
+   * - Manages ROB and LSQ for out-of-order execution
+   * - Handles memory operations through cache interface
+   * - Maintains program order for instruction retirement
+   */
   class CpuCoreGenerator : public ns3::Object {
   private:
-    int         m_coreId;
-    double      m_dt;      // CPU Clk period
-    double      m_clkSkew; // CPU Clk Skew
-    uint64_t    m_cpuCycle;
+    int         m_coreId;              // Core identifier
+    double      m_dt;                  // CPU clock period
+    double      m_clkSkew;             // CPU clock skew
+    uint64_t    m_cpuCycle;            // Current CPU cycle
 
-    uint64_t    m_cpuReqCnt;
-    uint64_t    m_cpuRespCnt;
+    uint64_t    m_cpuReqCnt;           // Total requests processed
+    uint64_t    m_cpuRespCnt;          // Total responses received
 
-    uint64_t    m_prevReqFinishCycle,
-                m_prevReqArriveCycle;
+    uint64_t    m_prevReqFinishCycle,  // Cycle when previous request finished
+                m_prevReqArriveCycle;   // Cycle when previous request arrived
 
-    bool        m_prevReqFinish;
+    bool        m_prevReqFinish;       // Previous request completion status
    
-    std::string m_bmFileName;
-    std::string m_cpuTraceFileName;
-    std::string m_CtrlsTraceFileName;
+    std::string m_bmFileName;          // Benchmark trace filename
+    std::string m_cpuTraceFileName;    // CPU trace output filename
+    std::string m_CtrlsTraceFileName;  // Controllers trace filename
 
-    CpuFIFO::ReqMsg  m_cpuMemReq;
-    CpuFIFO::RespMsg m_cpuMemResp;
+    CpuFIFO::ReqMsg  m_cpuMemReq;     // Current memory request
+    CpuFIFO::RespMsg m_cpuMemResp;    // Current memory response
  
-    // The bench-metric trace streams
-    std::ifstream m_bmTrace;
+    std::ifstream m_bmTrace;           // Benchmark trace input stream
+    std::ofstream m_cpuTrace;          // CPU trace output stream
+    std::ofstream m_ctrlsTrace;        // Controllers trace output stream
 
-    // The output stream for cpu ack tracing
-    std::ofstream m_cpuTrace;
+    CpuFIFO* m_cpuFIFO;               // Interface to CPU FIFO
 
-    // The output stream for internal ctrl(s) tracing
-    std::ofstream m_ctrlsTrace;
+    // Out-of-Order execution components
+    ROB* m_rob;                        // Reorder Buffer
+    LSQ* m_lsq;                        // Load Store Queue
 
-     // A pointer to CPU Interface FIFO
-     CpuFIFO* m_cpuFIFO;
+    bool m_cpuReqDone;                // All requests processed flag
+    bool m_newSampleRdy;              // New instruction ready flag
+    bool m_cpuCoreSimDone;            // Simulation complete flag
+    bool m_logFileGenEnable;          // Log file generation enabled
 
-    // ROB and LSQ
-    Ptr<ROB> m_rob;
-    Ptr<LSQ> m_lsq;
+    int m_number_of_OoO_requests;     // Maximum in-flight requests
+    int m_sent_requests;              // Current in-flight requests
 
-    // Cpu request done flag
-    bool m_cpuReqDone;
+    uint32_t m_remainingComputeInst;  // Remaining compute instructions
 
-    // Cpu new request ready flag
-    bool m_newSampleRdy;
-
-    // Cpu Simulation Done Flag
-    bool m_cpuCoreSimDone;
-
-    // enable flag for LogFile
-    bool m_logFileGenEnable;
-
-    int m_number_of_OoO_requests;
-    int m_sent_requests = 0;
-
-    // Called by static method to process step
-    // to insert new request or remove response
-    // from assoicatedBuffers.
+    /**
+     * @brief Processes transmit buffer operations
+     * 
+     * - Reads new instructions from trace
+     * - Allocates instructions to ROB/LSQ
+     * - Handles compute instruction processing
+     * - Manages memory request transmission
+     */
     void ProcessTxBuf();
+
+    /**
+     * @brief Processes receive buffer operations
+     * 
+     * - Handles memory responses
+     * - Updates ROB/LSQ status
+     * - Manages instruction completion
+     * - Tracks simulation progress
+     */
     void ProcessRxBuf();
 
-    // ROB and LSQ processing
-    void ProcessROB();
-    void ProcessLSQ();
-
   public:
-    // Override TypeId.
     static TypeId GetTypeId(void);
 
-    // CPU constructor must associated with two buffers
-    // one for Request channel and the ohter for Received
-    // response.
+    /**
+     * @brief Constructor
+     * @param associatedCpuFIFO CPU FIFO interface for cache communication
+     */
     CpuCoreGenerator(CpuFIFO* associatedCpuFIFO);
 
-    // Generator's destructor
     ~CpuCoreGenerator();
 
-    // set benchmark file name
-    void SetBmFileName (std::string bmFileName);
-
-   // set cpu dump file name
-    void SetCpuTraceFile (std::string fileName);
-
-   // set internal state dump file name
-    void SetCtrlsTraceFile (std::string fileName);
-
-    // set CoreId
-    void SetCoreId (int coreId);
-
-    // get core id
-    int GetCoreId ();
-
-    // set dt
-    void SetDt (double dt);
-
-    // set clk skew
-    void SetClkSkew (double clkSkew);
-
-    // get dt
-    int GetDt ();
-
-    void SetLogFileGenEnable (bool logFileGenEnable);
-
+    // Configuration methods
+    void SetBmFileName(std::string bmFileName);
+    void SetCpuTraceFile(std::string fileName);
+    void SetCtrlsTraceFile(std::string fileName);
+    void SetCoreId(int coreId);
+    void SetDt(double dt);
+    void SetClkSkew(double clkSkew);
+    void SetLogFileGenEnable(bool logFileGenEnable);
     void SetOutOfOrderStages(int stages);
 
-    // get simulation done flag
+    // Getters
+    int GetCoreId();
+    int GetDt();
     bool GetCpuSimDoneFlag();
 
-    // Initialize core generator
+    /**
+     * @brief Initializes the CPU core generator
+     * 
+     * - Opens trace files
+     * - Initializes ROB and LSQ
+     * - Sets up simulation parameters
+     */
     void init();
   
     /**
-     * Run CPUCoreGenerator every clock cycle to
-     * insert or remove request/response, this function
-     * does the scheduling
+     * @brief Main processing step called each clock cycle
+     * 
+     * - Processes new instructions
+     * - Handles ROB/LSQ operations
+     * - Manages memory operations
+     * - Updates simulation state
      */
-     static void Step(Ptr<CpuCoreGenerator> cpuCoreGenerator);
+    static void Step(Ptr<CpuCoreGenerator> cpuCoreGenerator);
+
+    // Out-of-Order component setters
+    void setROB(ROB* rob) { m_rob = rob; }
+    void setLSQ(LSQ* lsq) { m_lsq = lsq; }
   };
 
 }

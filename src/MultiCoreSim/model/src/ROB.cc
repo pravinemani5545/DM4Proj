@@ -1,84 +1,120 @@
 #include "../header/ROB.h"
-#include "ns3/type-id.h"
 
 namespace ns3 {
 
-TypeId ROB::GetTypeId(void) {
-    static TypeId tid = TypeId("ns3::ROB")
-        .SetParent<Object>()
-        .AddConstructor<ROB>();
-    return tid;
+/**
+ * @brief Constructor initializes ROB with default parameters
+ * 
+ * Pre-allocates space for maximum entries to avoid reallocations
+ */
+ROB::ROB() : num_entries(0) {
+    rob_q.reserve(MAX_ENTRIES);
 }
 
-ROB::ROB() : maxSize(32), nextId(0) {}
+ROB::~ROB() {}
 
-ROB::ROB(uint32_t size) : maxSize(size), nextId(0) {}
-
-bool ROB::isFull() const {
-    return buffer.size() >= maxSize;
+/**
+ * @brief Main processing step for ROB operations
+ * 
+ * Called every cycle to retire completed instructions
+ * in program order up to IPC limit
+ */
+void ROB::step() {
+    retire();
 }
 
-bool ROB::isEmpty() const {
-    return buffer.empty();
+/**
+ * @brief Check if ROB can accept new entries
+ * @return true if space available
+ * 
+ * Ensures ROB doesn't exceed maximum capacity
+ */
+bool ROB::canAccept() {
+    return num_entries < MAX_ENTRIES;
 }
 
+/**
+ * @brief Allocate new instruction in ROB
+ * @param request Instruction to allocate
+ * @return true if allocation successful
+ * 
+ * Compute instructions marked ready immediately
+ * Memory operations marked ready when completed:
+ * - Stores: ready when allocated in LSQ
+ * - Loads: ready when data available
+ */
 bool ROB::allocate(const CpuFIFO::ReqMsg& request) {
-    if (isFull()) {
+    if (!canAccept()) {
+        std::cout << "[ROB] Cannot allocate - ROB full" << std::endl;
         return false;
     }
 
     ROBEntry entry;
     entry.request = request;
-    entry.ready = (request.type == CpuFIFO::REQTYPE::COMPUTE);
-    entry.id = nextId++;
+    entry.ready = (request.type == CpuFIFO::REQTYPE::COMPUTE || 
+                  request.type == CpuFIFO::REQTYPE::WRITE);
     
-    buffer.push(entry);
+    rob_q.push_back(entry);
+    num_entries++;
+    
+    std::cout << "[ROB] Allocated instruction - Type: " 
+              << (request.type == CpuFIFO::REQTYPE::COMPUTE ? "COMPUTE" :
+                  request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
+              << " Ready: " << entry.ready << std::endl;
     return true;
 }
 
-bool ROB::retire() {
-    if (isEmpty() || !buffer.front().ready) {
-        return false;
-    }
-
-    buffer.pop();
-    return true;
-}
-
-void ROB::commit(uint64_t requestId) {
-    std::queue<ROBEntry> temp;
-    while (!buffer.empty()) {
-        ROBEntry entry = buffer.front();
-        buffer.pop();
-        
-        if (entry.id == requestId) {
-            entry.ready = true;
+/**
+ * @brief Retire completed instructions in program order
+ * 
+ * Retires up to IPC instructions per cycle:
+ * 1. Check if head instruction is ready
+ * 2. If ready, remove from ROB
+ * 3. Stop at first not-ready instruction
+ * 4. Stop after IPC instructions retired
+ */
+void ROB::retire() {
+    uint32_t retired = 0;
+    
+    while (!rob_q.empty() && retired < IPC) {
+        if (!rob_q.front().ready) {
+            std::cout << "[ROB] Cannot retire - Head instruction not ready" << std::endl;
+            break;  // Stop at first not-ready instruction
         }
-        temp.push(entry);
+        
+        auto& front = rob_q.front();
+        std::cout << "[ROB] Retiring instruction - Type: "
+                  << (front.request.type == CpuFIFO::REQTYPE::COMPUTE ? "COMPUTE" :
+                      front.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
+                  << " MsgId: " << front.request.msgId << std::endl;
+        
+        rob_q.erase(rob_q.begin());
+        num_entries--;
+        retired++;
     }
     
-    buffer = temp;
+    if (retired > 0) {
+        std::cout << "[ROB] Retired " << retired << " instructions this cycle" << std::endl;
+    }
 }
 
-uint32_t ROB::size() const {
-    return buffer.size();
-}
-
-uint32_t ROB::getMaxSize() const {
-    return maxSize;
-}
-
-bool ROB::isHeadReady() const {
-    if (isEmpty()) return false;
-    return buffer.front().ready;
-}
-
-const CpuFIFO::ReqMsg& ROB::getHeadRequest() const {
-    return buffer.front().request;
-}
-
-uint64_t ROB::getHeadId() const {
-    return buffer.front().id;
+/**
+ * @brief Mark instruction as complete
+ * @param requestId ID of instruction to commit
+ * 
+ * Called when:
+ * - Load receives data (from cache or forwarding)
+ * - Store allocated in LSQ
+ * - Compute instruction allocated (immediate)
+ */
+void ROB::commit(uint64_t requestId) {
+    for (auto& entry : rob_q) {
+        if (entry.request.msgId == requestId) {
+            entry.ready = true;
+            std::cout << "[ROB] Committed instruction MsgId: " << requestId << std::endl;
+            break;
+        }
+    }
 }
 
 } // namespace ns3
