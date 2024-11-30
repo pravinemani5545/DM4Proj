@@ -328,10 +328,9 @@ namespace ns3 {
             // Protect against underflow
             if (m_sent_requests > 0) {
                 m_sent_requests--;
+                m_cpuRespCnt++;  // Use existing response counter
                 std::cout << "[CPU] Decremented in-flight requests to " << m_sent_requests 
                           << "/" << m_number_of_OoO_requests << std::endl;
-            } else {
-                std::cout << "[CPU] Warning: m_sent_requests underflow prevented" << std::endl;
             }
             
             // For loads: mark as ready in ROB and LSQ
@@ -347,24 +346,19 @@ namespace ns3 {
                           << m_cpuMemResp.msgId << std::endl;
             }
             
+            // Track request completion
             m_prevReqFinish = true;
             m_prevReqFinishCycle = m_cpuCycle;
             m_prevReqArriveCycle = m_cpuMemResp.reqcycle;
-            m_cpuRespCnt++;
         }
         
+        // Check if simulation is complete
         if (m_cpuReqDone && m_cpuRespCnt >= m_cpuReqCnt) {
             m_cpuCoreSimDone = true;
-            Logger::getLogger()->traceEnd(m_coreId);
             std::cout << "\n[CPU] Core " << m_coreId << " simulation complete at cycle " 
                       << m_cpuCycle << std::endl;
             std::cout << "[CPU] Processed " << m_cpuReqCnt << " requests with " 
                       << m_cpuRespCnt << " responses" << std::endl;
-        }
-        else {
-            Simulator::Schedule(NanoSeconds(m_dt), &CpuCoreGenerator::Step, 
-                              Ptr<CpuCoreGenerator>(this));
-            m_cpuCycle++;
         }
     }
 

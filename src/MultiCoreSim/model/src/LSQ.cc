@@ -159,6 +159,7 @@ void LSQ::rxFromCache() {
         return;
     }
     
+    // Process one response per cycle as per original design
     auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
     m_cpuFIFO->m_rxFIFO.PopElement();
     
@@ -169,21 +170,18 @@ void LSQ::rxFromCache() {
     for (auto& entry : m_lsq_q) {
         if (entry.request.msgId == response.msgId) {
             if (entry.request.type == CpuFIFO::REQTYPE::READ) {
+                // Case 1 from 3.3.3: Load commits when data comes back from memory
                 entry.ready = true;
+                entry.waitingForCache = false;
                 std::cout << "[LSQ] Load data received from memory, marking ready" << std::endl;
                 if (m_rob) {
                     m_rob->commit(entry.request.msgId);
                 }
-                
-                // After receiving load data, check if any other loads can be forwarded
-                ldFwd(entry.request.addr);
-            } else {
+            } else if (entry.request.type == CpuFIFO::REQTYPE::WRITE) {
+                // For stores: mark cache write as acknowledged (for retirement)
                 entry.cache_ack = true;
-                entry.ready = true;  // Mark store as ready when cache acknowledges
+                entry.waitingForCache = false;
                 std::cout << "[LSQ] Store write acknowledged by cache" << std::endl;
-                if (m_rob) {
-                    m_rob->commit(entry.request.msgId);
-                }
             }
             break;
         }
@@ -208,7 +206,8 @@ void LSQ::retire() {
             }
         } else {
             // For stores: remove only after cache acknowledges write completion
-            can_remove = it->cache_ack;
+            // Note: Stores are ready on allocation (3.3.2) but need cache_ack to be removed
+            can_remove = it->ready && it->cache_ack;
             if (can_remove) {
                 std::cout << "[LSQ] Removing completed store " << it->request.msgId 
                           << " (addr=0x" << std::hex << it->request.addr 
@@ -219,6 +218,7 @@ void LSQ::retire() {
         if (can_remove) {
             it = m_lsq_q.erase(it);
             m_num_entries--;
+            std::cout << "[LSQ] Entry removed, remaining entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
         } else {
             ++it;
         }
