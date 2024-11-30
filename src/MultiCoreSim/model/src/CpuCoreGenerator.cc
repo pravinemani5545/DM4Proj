@@ -210,7 +210,8 @@ namespace ns3 {
                 std::string type;
                 uint64_t addr;
                 
-                if (iss >> std::dec >> compute_count >> type >> std::hex >> addr) {
+                // Parse compute count and type as before, but address as decimal
+                if (iss >> std::dec >> compute_count >> addr >> type) {
                     m_remaining_compute = compute_count;
                     std::cout << "[CPU] Found " << compute_count << " compute instructions" << std::endl;
                     
@@ -220,19 +221,19 @@ namespace ns3 {
                     }
                     
                     // Otherwise setup memory request if present
-                    if (type != "c") {
+                    if (type == "R" || type == "W") {
                         m_cpuMemReq.msgId = m_cpuReqCnt++;
                         m_cpuMemReq.reqCoreId = m_coreId;
                         m_cpuMemReq.addr = addr;
                         m_cpuMemReq.cycle = m_cpuCycle;
                         m_cpuMemReq.ready = false;
                         
-                        if (type == "r") {
+                        if (type == "R") {
                             m_cpuMemReq.type = CpuFIFO::REQTYPE::READ;
-                            std::cout << "[CPU] Parsed LOAD: addr=0x" << std::hex << addr 
-                                      << std::dec << " msgId=" << m_cpuMemReq.msgId << std::endl;
+                            std::cout << "[CPU] Parsed LOAD: addr=" << addr 
+                                      << " msgId=" << m_cpuMemReq.msgId << std::endl;
                         }
-                        else if (type == "w") {
+                        else {  // type == "W"
                             m_cpuMemReq.type = CpuFIFO::REQTYPE::WRITE;
                             m_cpuMemReq.ready = true;  // Stores ready immediately
                             std::cout << "[CPU] Store instruction " << m_cpuMemReq.msgId 
