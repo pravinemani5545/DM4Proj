@@ -158,24 +158,28 @@ namespace ns3 {
                     std::cout << "[ProcessTxBuf] Processing memory instruction - Type: " 
                              << (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
                              << " Address: 0x" << std::hex << m_cpuMemReq.addr << std::dec << std::endl;
-                    // Allocate in both ROB and LSQ
-                    if (m_rob->allocate(m_cpuMemReq)) {
-                        if (m_lsq->allocate(m_cpuMemReq)) {
+                    // Try LSQ allocation first
+                    if (m_lsq->allocate(m_cpuMemReq)) {
+                        // If LSQ allocation succeeds, then allocate to ROB
+                        if (m_rob->allocate(m_cpuMemReq)) {
                             if (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ) {
                                 // Check store forwarding for loads
                                 if (m_lsq->ldFwd(m_cpuMemReq.addr)) {
-                                    std::cout << "[ProcessTxBuf] Load forwarding hit for address 0x" 
-                                             << std::hex << m_cpuMemReq.addr << std::dec << std::endl;
+                                    std::cout << "[ProcessTxBuf] Load forwarding hit" << std::endl;
                                     m_rob->commit(m_cpuMemReq.msgId);
                                     m_lsq->commit(m_cpuMemReq.msgId);
                                 }
-                            } else if (m_cpuMemReq.type == CpuFIFO::REQTYPE::WRITE) {
-                                // Mark stores ready in ROB when allocated to LSQ per 3.3.2
+                            } else {
+                                // Mark stores ready in ROB when allocated
                                 m_rob->commit(m_cpuMemReq.msgId);
                             }
                             m_newSampleRdy = false;
                             m_sent_requests++;
-                            std::cout << "[ProcessTxBuf] Memory instruction allocated to ROB and LSQ" << std::endl;
+                            std::cout << "[ProcessTxBuf] Successfully allocated to both ROB and LSQ" << std::endl;
+                        } else {
+                            // If ROB allocation fails, we need to undo LSQ allocation
+                            std::cout << "[ProcessTxBuf] ROB allocation failed, undoing LSQ allocation" << std::endl;
+                            m_lsq->removeLastEntry();
                         }
                     }
                 }

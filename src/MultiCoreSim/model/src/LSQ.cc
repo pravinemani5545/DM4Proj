@@ -102,15 +102,18 @@ void LSQ::retire() {
  * Returns true if ready store to same address found
  */
 bool LSQ::ldFwd(uint64_t address) {
+    // Search LSQ from youngest to oldest for matching store
     for (auto it = lsq_q.rbegin(); it != lsq_q.rend(); ++it) {
         if (it->request.type == CpuFIFO::REQTYPE::WRITE && 
-            it->request.addr == address && 
-            it->ready) {
+            it->request.addr == address) {  // Requirements don't specify ready check
             std::cout << "[LSQ] Store-to-load forwarding hit - Address: 0x" 
-                      << std::hex << address << std::dec << std::endl;
+                      << std::hex << address << std::dec 
+                      << " Store MsgId: " << it->request.msgId << std::endl;
             return true;
         }
     }
+    std::cout << "[LSQ] No store-to-load forwarding hit - Address: 0x" 
+              << std::hex << address << std::dec << std::endl;
     return false;
 }
 
@@ -141,15 +144,29 @@ void LSQ::commit(uint64_t requestId) {
  * 3. Operation not already waiting
  */
 void LSQ::pushToCache() {
-    if (!lsq_q.empty() && m_cpuFIFO && !m_cpuFIFO->m_txFIFO.IsFull()) {
-        auto& entry = lsq_q.front();
-        if (!entry.waitingForCache) {
+    if (!m_cpuFIFO || m_cpuFIFO->m_txFIFO.IsFull()) {
+        return;
+    }
+
+    // For loads: Push all non-waiting loads that didn't hit in LSQ
+    for (auto& entry : lsq_q) {
+        if (entry.request.type == CpuFIFO::REQTYPE::READ && 
+            !entry.waitingForCache && !entry.ready) {
             m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
             entry.waitingForCache = true;
-            std::cout << "[LSQ] Pushed to cache - Type: "
-                      << (entry.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
-                      << " MsgId: " << entry.request.msgId
-                      << " Address: 0x" << std::hex << entry.request.addr << std::dec << std::endl;
+            std::cout << "[LSQ] Pushed load to cache - MsgId: " << entry.request.msgId 
+                     << " Address: 0x" << std::hex << entry.request.addr << std::dec << std::endl;
+        }
+    }
+
+    // For stores: Only push if at head of queue
+    if (!lsq_q.empty()) {
+        auto& head = lsq_q.front();
+        if (head.request.type == CpuFIFO::REQTYPE::WRITE && !head.waitingForCache) {
+            m_cpuFIFO->m_txFIFO.InsertElement(head.request);
+            head.waitingForCache = true;
+            std::cout << "[LSQ] Pushed store to cache - MsgId: " << head.request.msgId 
+                     << " Address: 0x" << std::hex << head.request.addr << std::dec << std::endl;
         }
     }
 }

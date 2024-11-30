@@ -101,6 +101,17 @@ public:
      * @return Number of entries
      */
     uint32_t size() const { return num_entries; }
+
+    /**
+     * @brief Removes the most recently added entry
+     * Used for cleanup if ROB allocation fails
+     */
+    void removeLastEntry() {
+        if (!lsq_q.empty()) {
+            lsq_q.pop_back();
+            num_entries--;
+        }
+    }
 };
 
 } // namespace ns3
