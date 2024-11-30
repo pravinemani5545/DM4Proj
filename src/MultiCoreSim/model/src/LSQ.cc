@@ -59,8 +59,14 @@ bool LSQ::allocate(const CpuFIFO::ReqMsg& request) {
 
     LSQEntry entry;
     entry.request = request;
-    entry.ready = (request.type == CpuFIFO::REQTYPE::WRITE);  // Stores ready immediately
     entry.waitingForCache = false;
+    
+    // For READ operations, check store forwarding before allocation
+    if (request.type == CpuFIFO::REQTYPE::READ) {
+        entry.ready = ldFwd(request.addr);  // Mark ready if forwarding succeeds
+    } else {
+        entry.ready = (request.type == CpuFIFO::REQTYPE::WRITE);  // Stores ready immediately
+    }
     
     lsq_q.push_back(entry);
     num_entries++;
@@ -123,10 +129,20 @@ bool LSQ::ldFwd(uint64_t address) {
     // Search LSQ from youngest to oldest for matching store
     for (auto it = lsq_q.rbegin(); it != lsq_q.rend(); ++it) {
         if (it->request.type == CpuFIFO::REQTYPE::WRITE && 
-            it->request.addr == address) {  // Requirements don't specify ready check
+            it->request.addr == address) {
             std::cout << "[LSQ] Store-to-load forwarding hit - Address: 0x" 
                       << std::hex << address << std::dec 
                       << " Store MsgId: " << it->request.msgId << std::endl;
+            
+            // Mark the load as ready since forwarding succeeded
+            for (auto& entry : lsq_q) {
+                if (entry.request.type == CpuFIFO::REQTYPE::READ && 
+                    entry.request.addr == address) {
+                    entry.ready = true;
+                    std::cout << "[LSQ] Marked load ready from forwarding - MsgId: " 
+                              << entry.request.msgId << std::endl;
+                }
+            }
             return true;
         }
     }
@@ -168,8 +184,18 @@ void LSQ::pushToCache() {
     
     // Only process oldest entry
     auto& oldest = lsq_q.front();
-    if (oldest.request.type == CpuFIFO::REQTYPE::WRITE && 
-        !oldest.waitingForCache) {
+    
+    // For READ operations: only send to cache if not ready (no store forwarding hit)
+    if (oldest.request.type == CpuFIFO::REQTYPE::READ && 
+        !oldest.waitingForCache && !oldest.ready) {
+        m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
+        oldest.waitingForCache = true;
+        std::cout << "[LSQ] Pushed load to cache - MsgId: " << oldest.request.msgId 
+                  << " Address: 0x" << std::hex << oldest.request.addr << std::dec << std::endl;
+    }
+    // For WRITE operations: send to cache when at head of queue
+    else if (oldest.request.type == CpuFIFO::REQTYPE::WRITE && 
+             !oldest.waitingForCache) {
         m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
         oldest.waitingForCache = true;
         std::cout << "[LSQ] Pushed store to cache - MsgId: " << oldest.request.msgId 
