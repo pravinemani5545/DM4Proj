@@ -5,8 +5,8 @@
 namespace ns3 {
 
 ROB::ROB() 
-    : m_rob_q(),
-      m_num_entries(0),
+    : m_num_entries(0),
+      m_rob_q(),
       m_lsq(nullptr),
       m_cpu(nullptr),
       m_current_cycle(0) {
@@ -15,19 +15,6 @@ ROB::ROB()
 }
 
 ROB::~ROB() {}
-
-void ROB::printState() const {
-    std::cout << "\n[ROB] Current State:" << std::endl;
-    std::cout << "  Entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
-    std::cout << "  Queue contents:" << std::endl;
-    for (size_t i = 0; i < m_rob_q.size(); i++) {
-        const auto& entry = m_rob_q[i];
-        std::cout << "    [" << i << "] ID: " << entry.request.msgId
-                  << " Type: " << (int)entry.request.type
-                  << " Ready: " << (entry.ready ? "Yes" : "No")
-                  << " Cycle: " << entry.allocate_cycle << std::endl;
-    }
-}
 
 void ROB::step() {
     std::cout << "\n[ROB] ========== Step at cycle " << m_current_cycle << " ==========" << std::endl;
@@ -50,6 +37,19 @@ void ROB::step() {
     m_current_cycle++;
 }
 
+void ROB::printState() const {
+    std::cout << "\n[ROB] Current State:" << std::endl;
+    std::cout << "  Entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
+    std::cout << "  Queue contents:" << std::endl;
+    for (size_t i = 0; i < m_rob_q.size(); i++) {
+        const auto& entry = m_rob_q[i];
+        std::cout << "    [" << i << "] ID: " << entry.request.msgId
+                  << " Type: " << (int)entry.request.type
+                  << " Ready: " << (entry.ready ? "Yes" : "No")
+                  << " Cycle: " << entry.allocate_cycle << std::endl;
+    }
+}
+
 bool ROB::canAccept() {
     bool can_accept = m_num_entries < MAX_ENTRIES;
     std::cout << "[ROB] Can accept new entry: " << (can_accept ? "yes" : "no") 
@@ -62,7 +62,7 @@ bool ROB::allocate(const CpuFIFO::ReqMsg& request) {
         std::cout << "[ROB] Allocation failed - ROB full" << std::endl;
         return false;
     }
-    
+
     ROBEntry entry;
     entry.request = request;
     entry.allocate_cycle = m_current_cycle;
@@ -117,6 +117,11 @@ void ROB::retire() {
         if (head.request.type == CpuFIFO::REQTYPE::WRITE && m_lsq) {
             std::cout << "[ROB] Notifying LSQ to commit store " << head.request.msgId << std::endl;
             m_lsq->commit(head.request.msgId);
+        }
+
+        // Notify CPU of retirement
+        if (m_cpu) {
+            m_cpu->onInstructionRetired(head.request);
         }
         
         // Remove from ROB after architectural retirement

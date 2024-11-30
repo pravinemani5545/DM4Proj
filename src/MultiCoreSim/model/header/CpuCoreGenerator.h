@@ -13,14 +13,13 @@
 #include "ns3/ptr.h"
 #include "ns3/core-module.h"
 #include "MemTemplate.h"
-#include "ROB.h"
-#include "LSQ.h"
-#include <fstream>
-#include <sstream>
-#include <iostream>
-#include <iomanip>
+#include <string>
 
 namespace ns3 {
+
+class CpuFIFO;
+class ROB;
+class LSQ;
 
 /**
  * @brief CPU Core Generator with Out-of-Order execution support
@@ -31,6 +30,12 @@ private:
     uint32_t m_coreId;              // Core identifier
     double m_dt;                    // Clock period
     double m_clkSkew;               // Clock skew
+    bool m_logFileGenEnable;        // Enable log file generation
+    
+    // Pipeline components
+    CpuFIFO* m_cpuFIFO;            // Interface to memory system
+    ROB* m_rob;                     // Reorder buffer
+    LSQ* m_lsq;                     // Load-store queue
     
     // Trace file handling
     std::string m_bmFileName;       // Benchmark trace filename
@@ -39,12 +44,6 @@ private:
     std::ifstream m_bmTrace;        // Trace file stream
     std::ofstream m_cpuTrace;       // CPU trace output stream
     std::ofstream m_ctrlsTrace;     // Controllers trace stream
-    bool m_logFileGenEnable;        // Enable log file generation
-    
-    // Pipeline components
-    CpuFIFO* m_cpuFIFO;            // Interface to memory system
-    ROB* m_rob;                     // Reorder buffer
-    LSQ* m_lsq;                     // Load-store queue
     
     // Execution state
     uint64_t m_cpuCycle;            // Current CPU cycle

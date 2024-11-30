@@ -8,7 +8,8 @@
 
 namespace ns3 {
 
-class ROB; // Forward declaration
+class ROB;
+class CpuFIFO;
 
 /**
  * @brief Load Store Queue (LSQ) implementation for Out-of-Order execution
@@ -66,25 +67,10 @@ public:
         if (!m_lsq_q.empty()) {
             m_lsq_q.pop_back();
             m_num_entries--;
-            std::cout << "[LSQ] Removed last entry, size now: " << m_num_entries << std::endl;
         }
     }
     
-    // Debug support
-    void printState() const {
-        std::cout << "\n[LSQ] Current State:" << std::endl;
-        std::cout << "  Entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
-        std::cout << "  Queue contents:" << std::endl;
-        for (size_t i = 0; i < m_lsq_q.size(); i++) {
-            const auto& entry = m_lsq_q[i];
-            std::cout << "    [" << i << "] ID: " << entry.request.msgId
-                      << " Type: " << (int)entry.request.type
-                      << " Ready: " << (entry.ready ? "Yes" : "No")
-                      << " WaitCache: " << (entry.waitingForCache ? "Yes" : "No")
-                      << " CacheAck: " << (entry.cache_ack ? "Yes" : "No")
-                      << " Cycle: " << entry.allocate_cycle << std::endl;
-        }
-    }
+    void printState() const;
 };
 
 } // namespace ns3

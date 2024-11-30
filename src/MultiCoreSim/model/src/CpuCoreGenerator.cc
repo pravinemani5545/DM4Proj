@@ -10,6 +10,8 @@
 #include "../header/CpuCoreGenerator.h"
 #include "../header/Logger.h"
 #include <sstream>
+#include "../header/ROB.h"
+#include "../header/LSQ.h"
 
 namespace ns3 {
 
@@ -399,6 +401,22 @@ namespace ns3 {
         // Process new instructions
         cpuCoreGenerator->ProcessTxBuf();
         cpuCoreGenerator->ProcessRxBuf();
+    }
+
+    void CpuCoreGenerator::setROB(ROB* rob) { m_rob = rob; }
+    void CpuCoreGenerator::setLSQ(LSQ* lsq) { m_lsq = lsq; }
+    void CpuCoreGenerator::setCpuFIFO(CpuFIFO* fifo) { m_cpuFIFO = fifo; }
+
+    void CpuCoreGenerator::onInstructionRetired(const CpuFIFO::ReqMsg& request) {
+        m_sent_requests--;  // Decrement in-flight count
+        std::cout << "[CPU] Instruction " << request.msgId << " retired, in-flight: " 
+                  << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
+    }
+
+    void CpuCoreGenerator::notifyRequestSentToCache() { 
+        m_sent_requests++;  // Track when request is actually sent to cache
+        std::cout << "[CPU] Request sent to cache, in-flight: " 
+                  << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
     }
 }
 
