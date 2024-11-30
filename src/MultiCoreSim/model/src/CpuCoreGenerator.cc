@@ -184,10 +184,10 @@ namespace ns3 {
                     break;  // Try again next cycle if ROB full
                 }
             }
-            return;  // Must process all compute before moving to memory
+            return;  // Force next cycle if any compute instructions remain
         }
         
-        // Try to process memory operation if no pending compute instructions
+        // Only process memory ops after ALL compute instructions are done
         if (m_newSampleRdy && m_rob && m_lsq) {
             if (m_rob->canAccept() && m_lsq->canAccept()) {
                 // Try ROB first
@@ -287,8 +287,7 @@ namespace ns3 {
      * 3. Processing TX and RX buffers
      */
     void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
-        // Add cycle limit check at the start
-        if (cpuCoreGenerator->m_cpuCycle >= 400) {
+        if (cpuCoreGenerator->m_cpuCycle >= 200) {
             cpuCoreGenerator->m_cpuCoreSimDone = true;
             std::cout << "\n[CPU] ========== Reached cycle limit (200) ==========" << std::endl;
             Logger::getLogger()->traceEnd(cpuCoreGenerator->m_coreId);

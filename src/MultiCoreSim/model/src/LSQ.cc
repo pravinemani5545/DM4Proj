@@ -78,31 +78,30 @@ bool LSQ::allocate(const CpuFIFO::ReqMsg& request) {
 }
 
 bool LSQ::ldFwd(uint64_t address) {
-    std::cout << "[LSQ] 3.3.3: Checking store-to-load forwarding for address 0x" 
-              << std::hex << address << std::dec << std::endl;
-              
-    // Must check from youngest (tail) to oldest (head)
-    for (auto it = m_lsq_q.rbegin(); it != m_lsq_q.rend(); ++it) {
-        if (it->request.type == CpuFIFO::REQTYPE::WRITE && 
-            it->request.addr == address) {
-            
-            // Must mark ALL subsequent loads to this address as ready
-            for (auto& entry : m_lsq_q) {
-                if (entry.request.type == CpuFIFO::REQTYPE::READ &&
-                    entry.request.addr == address &&
-                    !entry.ready) {
-                    entry.ready = true;
-                    if (m_rob) {
-                        m_rob->commit(entry.request.msgId);
-                        std::cout << "[LSQ] 3.3.3: Load " << entry.request.msgId 
-                                  << " committed through store forwarding" << std::endl;
-                    }
-                }
+    // Find youngest matching store first
+    auto youngest_store = std::find_if(m_lsq_q.rbegin(), m_lsq_q.rend(),
+        [address](const LSQEntry& entry) {
+            return entry.request.type == CpuFIFO::REQTYPE::WRITE && 
+                   entry.request.addr == address;
+        });
+    
+    if (youngest_store == m_lsq_q.rend()) {
+        return false;  // No matching store found
+    }
+    
+    // Forward to loads that come after this store
+    auto store_pos = youngest_store.base();
+    for (auto it = store_pos; it != m_lsq_q.end(); ++it) {
+        if (it->request.type == CpuFIFO::REQTYPE::READ && 
+            it->request.addr == address && 
+            !it->ready) {
+            it->ready = true;
+            if (m_rob) {
+                m_rob->commit(it->request.msgId);
             }
-            return true;
         }
     }
-    return false;
+    return true;
 }
 
 void LSQ::pushToCache() {
@@ -110,12 +109,14 @@ void LSQ::pushToCache() {
         return;
     }
     
-    for (auto& entry : m_lsq_q) {
-        if (entry.request.type == CpuFIFO::REQTYPE::WRITE && 
-            entry.ready && !entry.waitingForCache) {
-            entry.waitingForCache = true;
-            m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
-            std::cout << "[LSQ] Pushed store " << entry.request.msgId 
+    // Since m_lsq_q maintains program order (oldest at front),
+    // iterate from beginning to find oldest ready store
+    for (auto it = m_lsq_q.begin(); it != m_lsq_q.end(); ++it) {
+        if (it->request.type == CpuFIFO::REQTYPE::WRITE && 
+            it->ready && !it->waitingForCache) {
+            it->waitingForCache = true;
+            m_cpuFIFO->m_txFIFO.InsertElement(it->request);
+            std::cout << "[LSQ] Pushed oldest store " << it->request.msgId 
                       << " to cache" << std::endl;
             break;
         }
