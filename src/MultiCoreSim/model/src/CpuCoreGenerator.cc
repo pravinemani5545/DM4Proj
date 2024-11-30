@@ -342,7 +342,6 @@ namespace ns3 {
             // Track request completion
             m_prevReqFinish = true;
             m_prevReqFinishCycle = m_cpuCycle;
-            m_prevReqArriveCycle = m_cpuMemResp.reqcycle;
         }
         
         // Check if simulation is complete
@@ -391,15 +390,6 @@ namespace ns3 {
         // Process new instructions
         cpuCoreGenerator->ProcessTxBuf();
         cpuCoreGenerator->ProcessRxBuf();
-    }
-
-    void CpuCoreGenerator::onInstructionRetired(const CpuFIFO::ReqMsg& request) {
-        // Decrement in-flight count when instruction architecturally retires
-        if (m_sent_requests > 0) {
-            m_sent_requests--;
-            std::cout << "[CPU] Instruction " << request.msgId << " retired, decremented in-flight to " 
-                      << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
-        }
     }
 }
 
