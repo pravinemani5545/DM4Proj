@@ -68,8 +68,17 @@ uint32_t ROB::getMaxSize() const {
     return maxSize;
 }
 
-const ROB::ROBEntry& ROB::getHead() const {
-    return buffer.front();
+bool ROB::isHeadReady() const {
+    if (isEmpty()) return false;
+    return buffer.front().ready;
+}
+
+const CpuFIFO::ReqMsg& ROB::getHeadRequest() const {
+    return buffer.front().request;
+}
+
+uint64_t ROB::getHeadId() const {
+    return buffer.front().id;
 }
 
 } // namespace ns3

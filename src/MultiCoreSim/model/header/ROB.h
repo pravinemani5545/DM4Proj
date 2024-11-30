@@ -39,7 +39,11 @@ public:
     // Getters
     uint32_t size() const;
     uint32_t getMaxSize() const;
-    const ROBEntry& getHead() const;
+    
+    // Entry information access
+    bool isHeadReady() const;
+    const CpuFIFO::ReqMsg& getHeadRequest() const;
+    uint64_t getHeadId() const;
 };
 
 } // namespace ns3

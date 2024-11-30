@@ -247,14 +247,14 @@ namespace ns3 {
     void CpuCoreGenerator::ProcessROB() {
         // Only try to retire if we have instructions and the head is ready
         if (!m_rob->isEmpty()) {
-            const ROB::ROBEntry& head = m_rob->getHead();
-            if (!head.ready) return;
+            if (!m_rob->isHeadReady()) return;
 
             // For memory operations, need LSQ coordination
-            if (head.request.type != CpuFIFO::REQTYPE::COMPUTE) {
+            const CpuFIFO::ReqMsg& headReq = m_rob->getHeadRequest();
+            if (headReq.type != CpuFIFO::REQTYPE::COMPUTE) {
                 if (!m_lsq->isEmpty()) {
                     // Ensure LSQ is ready and memory ordering is maintained
-                    if (!m_lsq->canExecute(head.request) || !m_lsq->retire(head.request)) {
+                    if (!m_lsq->canExecute(headReq) || !m_lsq->retire(headReq)) {
                         return;
                     }
                 }
@@ -272,17 +272,19 @@ namespace ns3 {
         if (m_rob->isEmpty()) return;
 
         // Check for store-load forwarding opportunities
-        const ROB::ROBEntry& head = m_rob->getHead();
-        if (head.request.type == CpuFIFO::REQTYPE::READ && !head.ready) {
-            if (m_lsq->hasStore(head.request.addr)) {
-                // Check if we can forward from a ready store
-                if (m_lsq->ldFwd(head.request.addr)) {
-                    // Mark as ready in both ROB and LSQ
-                    m_rob->commit(head.request.msgId);
-                    m_lsq->commit(head.request.msgId);
-                    
-                    if (m_logFileGenEnable) {
-                        std::cout << "Cpu " << m_coreId << " forwarded store to load at cycle " << m_cpuCycle << std::endl;
+        if (!m_rob->isHeadReady()) {
+            const CpuFIFO::ReqMsg& headReq = m_rob->getHeadRequest();
+            if (headReq.type == CpuFIFO::REQTYPE::READ) {
+                if (m_lsq->hasStore(headReq.addr)) {
+                    // Check if we can forward from a ready store
+                    if (m_lsq->ldFwd(headReq.addr)) {
+                        // Mark as ready in both ROB and LSQ
+                        m_rob->commit(headReq.msgId);
+                        m_lsq->commit(headReq.msgId);
+                        
+                        if (m_logFileGenEnable) {
+                            std::cout << "Cpu " << m_coreId << " forwarded store to load at cycle " << m_cpuCycle << std::endl;
+                        }
                     }
                 }
             }
