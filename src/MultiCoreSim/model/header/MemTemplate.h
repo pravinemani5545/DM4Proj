@@ -87,8 +87,7 @@ namespace ns3
       uint64_t fifoInserionCycle;    // FIFO insertion cycle
       REQTYPE type;                  // Request type
       uint8_t data[8];              // Data payload
-      uint64_t ready;               // OoO execution ready flag
-      uint32_t numComputeInst;      // Number of compute instructions
+      bool ready;                   // OoO execution ready flag
     };
 
     /**

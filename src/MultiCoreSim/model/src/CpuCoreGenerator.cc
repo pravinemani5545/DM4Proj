@@ -142,45 +142,56 @@ namespace ns3 {
                 computeReq.reqCoreId = m_coreId;
                 
                 if (m_rob->allocate(computeReq)) {
-                    m_rob->commit(computeReq.msgId);  // Mark ready immediately per 3.3.1
+                    std::cout << "[ProcessTxBuf] Committing compute instruction (immediate):" << std::endl;
+                    std::cout << "  - MsgId: " << computeReq.msgId << std::endl;
+                    std::cout << "  - Type: COMPUTE" << std::endl;
+                    m_rob->commit(computeReq.msgId);
                     m_remainingComputeInst--;
-                    std::cout << "[ProcessTxBuf] Allocated compute instruction to ROB, " << m_remainingComputeInst << " remaining" << std::endl;
                 }
             }
             return;  // Process remaining compute next cycle
         }
 
         // Process memory instructions
-        if (!m_cpuFIFO->m_txFIFO.IsFull() && !m_cpuReqDone && 
-            m_sent_requests < m_number_of_OoO_requests) {
-            if (m_rob->canAccept() && m_lsq->canAccept()) {
-                if (m_newSampleRdy) {
-                    std::cout << "[ProcessTxBuf] Processing memory instruction - Type: " 
-                             << (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
-                             << " Address: 0x" << std::hex << m_cpuMemReq.addr << std::dec << std::endl;
-                    // Try LSQ allocation first
-                    if (m_lsq->allocate(m_cpuMemReq)) {
-                        // If LSQ allocation succeeds, then allocate to ROB
-                        if (m_rob->allocate(m_cpuMemReq)) {
-                            if (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ) {
-                                // Check store forwarding for loads
-                                if (m_lsq->ldFwd(m_cpuMemReq.addr)) {
-                                    std::cout << "[ProcessTxBuf] Load forwarding hit" << std::endl;
-                                    m_rob->commit(m_cpuMemReq.msgId);
-                                    m_lsq->commit(m_cpuMemReq.msgId);
-                                }
-                            } else {
-                                // Mark stores ready in ROB when allocated
+        if (m_rob->canAccept() && m_lsq->canAccept()) {
+            if (m_newSampleRdy) {
+                std::cout << "[ProcessTxBuf] Processing memory instruction - Type: " 
+                         << (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
+                         << " Address: 0x" << std::hex << m_cpuMemReq.addr << std::dec << std::endl;
+                
+                // Try LSQ allocation first
+                if (m_lsq->allocate(m_cpuMemReq)) {
+                    // If LSQ allocation succeeds, then allocate to ROB
+                    if (m_rob->allocate(m_cpuMemReq)) {
+                        if (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ) {
+                            // Check store forwarding for loads
+                            if (m_lsq->ldFwd(m_cpuMemReq.addr)) {
+                                std::cout << "[ProcessTxBuf] Committing load instruction (forwarding hit):" << std::endl;
+                                std::cout << "  - MsgId: " << m_cpuMemReq.msgId << std::endl;
+                                std::cout << "  - Address: 0x" << std::hex << m_cpuMemReq.addr << std::dec << std::endl;
                                 m_rob->commit(m_cpuMemReq.msgId);
+                                m_lsq->commit(m_cpuMemReq.msgId);
                             }
-                            m_newSampleRdy = false;
-                            m_sent_requests++;
-                            std::cout << "[ProcessTxBuf] Successfully allocated to both ROB and LSQ" << std::endl;
                         } else {
-                            // If ROB allocation fails, we need to undo LSQ allocation
-                            std::cout << "[ProcessTxBuf] ROB allocation failed, undoing LSQ allocation" << std::endl;
-                            m_lsq->removeLastEntry();
+                            std::cout << "[ProcessTxBuf] Committing store instruction (immediate):" << std::endl;
+                            std::cout << "  - MsgId: " << m_cpuMemReq.msgId << std::endl;
+                            std::cout << "  - Address: 0x" << std::hex << m_cpuMemReq.addr << std::dec << std::endl;
+                            m_rob->commit(m_cpuMemReq.msgId);
+                            m_lsq->commit(m_cpuMemReq.msgId);
                         }
+                        
+                        // Track request counts
+                        m_cpuReqCnt++;
+                        m_sent_requests++;
+                        std::cout << "[ProcessTxBuf] Updated request counters:" << std::endl;
+                        std::cout << "  - Total Requests: " << m_cpuReqCnt << std::endl;
+                        std::cout << "  - In-flight Requests: " << m_sent_requests << std::endl;
+                        
+                        m_newSampleRdy = false;
+                    } else {
+                        // If ROB allocation fails, we need to undo LSQ allocation
+                        std::cout << "[ProcessTxBuf] ROB allocation failed, undoing LSQ allocation" << std::endl;
+                        m_lsq->removeLastEntry();
                     }
                 }
             }
@@ -190,12 +201,22 @@ namespace ns3 {
         if (!m_newSampleRdy) {
             std::string fline;
             if (getline(m_bmTrace, fline)) {
+                std::cout << "\n[ProcessTxBuf] Raw trace line: '" << fline << "'" << std::endl;
+                
                 std::istringstream iss(fline);
                 uint32_t computeCount;
                 std::string addr, type;
                 
                 // Parse: computeCount addr type
-                iss >> computeCount >> addr >> type;
+                if (!(iss >> computeCount >> addr >> type)) {
+                    std::cout << "[ProcessTxBuf] ERROR: Failed to parse trace line" << std::endl;
+                    return;
+                }
+                
+                std::cout << "[ProcessTxBuf] Parsed values:" << std::endl;
+                std::cout << "  - Compute Count: " << computeCount << std::endl;
+                std::cout << "  - Address (hex): 0x" << addr << std::endl;
+                std::cout << "  - Type: " << type << std::endl;
                 
                 m_remainingComputeInst = computeCount;
                 m_cpuMemReq.addr = (uint64_t)strtol(addr.c_str(), NULL, 16);
@@ -204,11 +225,15 @@ namespace ns3 {
                 
                 m_cpuMemReq.msgId = IdGenerator::nextReqId();
                 m_cpuMemReq.reqCoreId = m_coreId;
-                m_newSampleRdy = true;
                 
-                std::cout << "\n[ProcessTxBuf] Read trace line - Compute Count: " << computeCount 
-                         << " Address: 0x" << addr 
-                         << " Type: " << type << std::endl;
+                std::cout << "[ProcessTxBuf] Converted values:" << std::endl;
+                std::cout << "  - m_remainingComputeInst: " << m_remainingComputeInst << std::endl;
+                std::cout << "  - m_cpuMemReq.addr (hex): 0x" << std::hex << m_cpuMemReq.addr << std::dec << std::endl;
+                std::cout << "  - m_cpuMemReq.type: " << (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
+                std::cout << "  - m_cpuMemReq.msgId: " << m_cpuMemReq.msgId << std::endl;
+                std::cout << "  - m_cpuMemReq.reqCoreId: " << m_cpuMemReq.reqCoreId << std::endl;
+                
+                m_newSampleRdy = true;
             } else {
                 m_cpuReqDone = true;
                 std::cout << "[ProcessTxBuf] Reached end of trace file" << std::endl;
@@ -233,7 +258,16 @@ namespace ns3 {
             auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
             m_cpuFIFO->m_rxFIFO.PopElement();
             
-            // Update LSQ and ROB
+            std::cout << "\n[ProcessRxBuf] Received cache response:" << std::endl;
+            std::cout << "  - MsgId: " << response.msgId << std::endl;
+            std::cout << "  - Address: 0x" << std::hex << response.addr << std::dec << std::endl;
+            std::cout << "  - Request Cycle: " << response.reqcycle << std::endl;
+            std::cout << "  - Response Cycle: " << response.cycle << std::endl;
+            
+            std::cout << "[ProcessRxBuf] Committing load instruction (cache response):" << std::endl;
+            std::cout << "  - MsgId: " << response.msgId << std::endl;
+            std::cout << "  - Address: 0x" << std::hex << response.addr << std::dec << std::endl;
+            
             m_lsq->commit(response.msgId);
             m_rob->commit(response.msgId);
             
@@ -242,6 +276,7 @@ namespace ns3 {
         }
         
         // Call retire on ROB and LSQ every cycle
+        std::cout << "\n[ProcessRxBuf] Calling retire on ROB and LSQ" << std::endl;
         m_rob->retire();
         m_lsq->retire();
         
@@ -250,8 +285,9 @@ namespace ns3 {
             m_rob->isEmpty() && m_lsq->isEmpty()) {
             m_cpuCoreSimDone = true;
             Logger::getLogger()->traceEnd(m_coreId);
-            std::cout << "Cpu " << m_coreId << " Simulation End @ processor cycle # " 
-                     << m_cpuCycle << std::endl;
+            std::cout << "\n[ProcessRxBuf] Simulation complete:" << std::endl;
+            std::cout << "  - CPU Core: " << m_coreId << std::endl;
+            std::cout << "  - Final Cycle: " << m_cpuCycle << std::endl;
         } else {
             // Schedule next cycle
             Simulator::Schedule(NanoSeconds(m_dt), &CpuCoreGenerator::Step,

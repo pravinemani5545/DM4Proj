@@ -85,13 +85,24 @@ bool ROB::allocate(const CpuFIFO::ReqMsg& request) {
 void ROB::retire() {
     uint32_t retired = 0;
     
+    std::cout << "\n[ROB] Starting retirement cycle:" << std::endl;
+    std::cout << "  - Queue size: " << rob_q.size() << std::endl;
+    std::cout << "  - IPC limit: " << IPC << std::endl;
+    
     while (!rob_q.empty() && retired < IPC) {
-        if (!rob_q.front().ready) {
+        auto& front = rob_q.front();
+        
+        std::cout << "\n[ROB] Checking head instruction:" << std::endl;
+        std::cout << "  - Type: " << (front.request.type == CpuFIFO::REQTYPE::COMPUTE ? "COMPUTE" :
+                                    front.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
+        std::cout << "  - MsgId: " << front.request.msgId << std::endl;
+        std::cout << "  - Ready: " << front.ready << std::endl;
+        
+        if (!front.ready) {
             std::cout << "[ROB] Cannot retire - Head instruction not ready" << std::endl;
             break;  // Stop at first not-ready instruction
         }
         
-        auto& front = rob_q.front();
         std::cout << "[ROB] Retiring instruction - Type: "
                   << (front.request.type == CpuFIFO::REQTYPE::COMPUTE ? "COMPUTE" :
                       front.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
@@ -100,6 +111,8 @@ void ROB::retire() {
         rob_q.erase(rob_q.begin());
         num_entries--;
         retired++;
+        
+        std::cout << "  - Instructions retired this cycle: " << retired << "/" << IPC << std::endl;
     }
     
     if (retired > 0) {

@@ -83,10 +83,28 @@ void LSQ::retire() {
     if (lsq_q.empty()) return;
     
     auto& front = lsq_q.front();
-    if (front.ready) {
+    bool can_retire = false;
+
+    std::cout << "\n[LSQ] Checking retirement for head operation:" << std::endl;
+    std::cout << "  - Type: " << (front.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
+    std::cout << "  - MsgId: " << front.request.msgId << std::endl;
+    std::cout << "  - Address: 0x" << std::hex << front.request.addr << std::dec << std::endl;
+    std::cout << "  - Ready: " << front.ready << std::endl;
+    std::cout << "  - WaitingForCache: " << front.waitingForCache << std::endl;
+
+    if (front.request.type == CpuFIFO::REQTYPE::READ) {
+        can_retire = front.ready;
+        std::cout << "  - Load can retire: " << can_retire << " (ready from cache or forwarding)" << std::endl;
+    } else {
+        can_retire = front.ready && !front.waitingForCache;
+        std::cout << "  - Store can retire: " << can_retire << " (ready && cache confirmed)" << std::endl;
+    }
+    
+    if (can_retire) {
         std::cout << "[LSQ] Retiring memory operation - Type: "
                   << (front.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
-                  << " Address: 0x" << std::hex << front.request.addr << std::dec << std::endl;
+                  << " Address: 0x" << std::hex << front.request.addr 
+                  << " MsgId: " << front.request.msgId << std::dec << std::endl;
         
         lsq_q.erase(lsq_q.begin());
         num_entries--;
@@ -144,30 +162,18 @@ void LSQ::commit(uint64_t requestId) {
  * 3. Operation not already waiting
  */
 void LSQ::pushToCache() {
-    if (!m_cpuFIFO || m_cpuFIFO->m_txFIFO.IsFull()) {
+    if (!m_cpuFIFO || m_cpuFIFO->m_txFIFO.IsFull() || lsq_q.empty()) {
         return;
     }
-
-    // For loads: Push all non-waiting loads that didn't hit in LSQ
-    for (auto& entry : lsq_q) {
-        if (entry.request.type == CpuFIFO::REQTYPE::READ && 
-            !entry.waitingForCache && !entry.ready) {
-            m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
-            entry.waitingForCache = true;
-            std::cout << "[LSQ] Pushed load to cache - MsgId: " << entry.request.msgId 
-                     << " Address: 0x" << std::hex << entry.request.addr << std::dec << std::endl;
-        }
-    }
-
-    // For stores: Only push if at head of queue
-    if (!lsq_q.empty()) {
-        auto& head = lsq_q.front();
-        if (head.request.type == CpuFIFO::REQTYPE::WRITE && !head.waitingForCache) {
-            m_cpuFIFO->m_txFIFO.InsertElement(head.request);
-            head.waitingForCache = true;
-            std::cout << "[LSQ] Pushed store to cache - MsgId: " << head.request.msgId 
-                     << " Address: 0x" << std::hex << head.request.addr << std::dec << std::endl;
-        }
+    
+    // Only process oldest entry
+    auto& oldest = lsq_q.front();
+    if (oldest.request.type == CpuFIFO::REQTYPE::WRITE && 
+        !oldest.waitingForCache) {
+        m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
+        oldest.waitingForCache = true;
+        std::cout << "[LSQ] Pushed store to cache - MsgId: " << oldest.request.msgId 
+                  << " Address: 0x" << std::hex << oldest.request.addr << std::dec << std::endl;
     }
 }
 
