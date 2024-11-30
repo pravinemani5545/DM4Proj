@@ -41,6 +41,8 @@ public:
     void pushToCache();
     void rxFromCache();
     bool ldFwd(uint64_t address) const;  // Load forwarding from youngest matching store
+    bool checkLoadStore(const CpuFIFO::ReqMsg& load) const;  // Check all stores for a load
+    bool canExecute(const CpuFIFO::ReqMsg& req) const;  // Check if operation can execute
     
     // Commit handling
     void commit(uint64_t requestId);

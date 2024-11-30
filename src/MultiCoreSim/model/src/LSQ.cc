@@ -109,4 +109,35 @@ uint32_t LSQ::getMaxSize() const {
     return maxSize;
 }
 
+bool LSQ::checkLoadStore(const CpuFIFO::ReqMsg& load) const {
+    if (load.type != CpuFIFO::REQTYPE::READ) {
+        return true;  // Only check loads
+    }
+    
+    // Check all stores for this address
+    for (const auto& store : addressMap) {
+        if (store.first == load.addr) {
+            if (!store.second->ready) {
+                return false;  // Found an unready store to same address
+            }
+        }
+    }
+    return true;  // No conflicting stores found
+}
+
+bool LSQ::canExecute(const CpuFIFO::ReqMsg& req) const {
+    if (req.type == CpuFIFO::REQTYPE::READ) {
+        // For loads, check all previous stores
+        return checkLoadStore(req);
+    }
+    else if (req.type == CpuFIFO::REQTYPE::WRITE) {
+        // For stores, check if any previous load/store to same address is pending
+        auto it = addressMap.find(req.addr);
+        if (it != addressMap.end() && !it->second->ready) {
+            return false;  // Found pending operation to same address
+        }
+    }
+    return true;
+}
+
 } // namespace ns3
