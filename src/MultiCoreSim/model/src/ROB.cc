@@ -124,8 +124,10 @@ void ROB::commit(uint64_t requestId) {
     
     for (auto& entry : m_rob_q) {
         if (entry.request.msgId == requestId) {
-            entry.ready = true;
-            std::cout << "[ROB] Marked request " << requestId << " as ready" << std::endl;
+            if (!entry.ready) {  // Only mark ready if not already ready
+                entry.ready = true;
+                std::cout << "[ROB] Marked request " << requestId << " as ready" << std::endl;
+            }
             return;
         }
     }

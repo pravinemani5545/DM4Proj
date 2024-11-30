@@ -138,8 +138,8 @@ void LSQ::pushToCache() {
 
     // Check for load operations ready to be sent to cache
     for (auto& entry : m_lsq_q) {
-        if (entry.request.type == CpuFIFO::REQTYPE::READ && !entry.waitingForCache) {
-            // Send load to cache
+        if (entry.request.type == CpuFIFO::REQTYPE::READ && !entry.waitingForCache && !entry.ready) {
+            // Only send loads that haven't been satisfied by forwarding
             entry.waitingForCache = true;
             m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
             if (m_rob && m_rob->getCpu()) {
@@ -179,7 +179,11 @@ void LSQ::rxFromCache() {
                 ldFwd(entry.request.addr);
             } else {
                 entry.cache_ack = true;
+                entry.ready = true;  // Mark store as ready when cache acknowledges
                 std::cout << "[LSQ] Store write acknowledged by cache" << std::endl;
+                if (m_rob) {
+                    m_rob->commit(entry.request.msgId);
+                }
             }
             break;
         }
