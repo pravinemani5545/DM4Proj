@@ -1,5 +1,6 @@
 #include "../header/LSQ.h"
 #include "../header/ROB.h"
+#include "../header/CpuCoreGenerator.h"
 
 namespace ns3 {
 
