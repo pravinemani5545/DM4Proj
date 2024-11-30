@@ -97,7 +97,7 @@ void ROB::retire() {
             m_lsq->commit(head.request.msgId);
         }
 
-        // Notify CPU of retirement
+        // Notify CPU of retirement - CRITICAL for tracking in-flight instructions
         if (m_cpu) {
             m_cpu->onInstructionRetired(head.request);
         }

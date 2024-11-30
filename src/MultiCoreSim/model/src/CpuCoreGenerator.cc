@@ -171,9 +171,6 @@ namespace ns3 {
             // Try to allocate ONE compute instruction this cycle
             if (m_rob && m_rob->canAccept() && m_sent_requests < m_number_of_OoO_requests) {
                 std::cout << "[CPU] Attempting to allocate compute instruction:" << std::endl;
-                std::cout << "[CPU] - Remaining compute: " << m_remaining_compute << std::endl;
-                std::cout << "[CPU] - In-flight requests: " << m_sent_requests << "/" 
-                          << m_number_of_OoO_requests << std::endl;
                 
                 // Create compute instruction request
                 CpuFIFO::ReqMsg compute_req;
@@ -193,10 +190,6 @@ namespace ns3 {
                     m_sent_requests++;  // Track compute instruction as in-flight
                     std::cout << "[CPU] Successfully allocated compute instruction " 
                               << compute_req.msgId << " (ready immediately)" << std::endl;
-                    std::cout << "[CPU] Updated state:" << std::endl;
-                    std::cout << "[CPU] - Remaining compute: " << m_remaining_compute << std::endl;
-                    std::cout << "[CPU] - In-flight requests: " << m_sent_requests << "/" 
-                              << m_number_of_OoO_requests << std::endl;
                 } else {
                     std::cout << "[CPU] ROB allocation failed, will retry next cycle" << std::endl;
                 }
@@ -206,7 +199,7 @@ namespace ns3 {
             if (m_remaining_compute > 0) {
                 std::cout << "[CPU] Still have " << m_remaining_compute 
                           << " compute instructions remaining, will continue next cycle" << std::endl;
-                return;
+                return;  // Let Step() handle cycle advancement
             }
         }
         
@@ -398,6 +391,15 @@ namespace ns3 {
         // Process new instructions
         cpuCoreGenerator->ProcessTxBuf();
         cpuCoreGenerator->ProcessRxBuf();
+    }
+
+    void CpuCoreGenerator::onInstructionRetired(const CpuFIFO::ReqMsg& request) {
+        // Decrement in-flight count when instruction architecturally retires
+        if (m_sent_requests > 0) {
+            m_sent_requests--;
+            std::cout << "[CPU] Instruction " << request.msgId << " retired, decremented in-flight to " 
+                      << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
+        }
     }
 }
 
