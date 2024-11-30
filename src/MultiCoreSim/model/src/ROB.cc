@@ -10,6 +10,8 @@ TypeId ROB::GetTypeId(void) {
     return tid;
 }
 
+ROB::ROB() : maxSize(32), nextId(0) {}
+
 ROB::ROB(uint32_t size) : maxSize(size), nextId(0) {}
 
 bool ROB::isFull() const {

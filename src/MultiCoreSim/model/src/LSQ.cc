@@ -10,6 +10,8 @@ TypeId LSQ::GetTypeId(void) {
     return tid;
 }
 
+LSQ::LSQ() : maxSize(16) {}
+
 LSQ::LSQ(uint32_t size) : maxSize(size) {}
 
 LSQ::~LSQ() {

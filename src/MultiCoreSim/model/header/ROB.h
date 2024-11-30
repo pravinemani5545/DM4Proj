@@ -25,6 +25,7 @@ private:
 public:
     static TypeId GetTypeId(void);
     
+    ROB();
     ROB(uint32_t size);
     ~ROB() = default;
 

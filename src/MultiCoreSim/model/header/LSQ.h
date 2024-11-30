@@ -26,6 +26,7 @@ private:
 public:
     static TypeId GetTypeId(void);
     
+    LSQ();
     LSQ(uint32_t size);
     ~LSQ();
 
