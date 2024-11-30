@@ -6,113 +6,73 @@
  * Created On February 16, 2020
  * Modified for Out-of-Order execution support
  */
-#ifndef _CpuCoreGenerator_H
-#define _CpuCoreGenerator_H
+#ifndef CPU_CORE_GENERATOR_H
+#define CPU_CORE_GENERATOR_H
 
-#include "ns3/ptr.h"
 #include "ns3/object.h"
+#include "ns3/ptr.h"
 #include "ns3/core-module.h"
-#include "IdGenerator.h"
 #include "MemTemplate.h"
-#include "Logger.h"
 #include "ROB.h"
 #include "LSQ.h"
-#include <string>
-#include <iostream>
 #include <fstream>
 #include <sstream>
+#include <iostream>
+#include <iomanip>
 
-namespace ns3 { 
-  /**
-   * @brief CPU Core Generator with Out-of-Order execution support
-   * 
-   * Implements processor instruction execution according to a benchmark trace.
-   * Instructions are processed out-of-order using ROB and LSQ while maintaining
-   * program order for commits. The generator interfaces with the Cache Controller
-   * through request/response buffers.
-   * 
-   * Key features:
-   * - Reads benchmark trace with compute and memory instructions
-   * - Manages ROB and LSQ for out-of-order execution
-   * - Handles memory operations through cache interface
-   * - Maintains program order for instruction retirement
-   */
-  class CpuCoreGenerator : public ns3::Object {
-  private:
-    int         m_coreId;              // Core identifier
-    double      m_dt;                  // CPU clock period
-    double      m_clkSkew;             // CPU clock skew
-    uint64_t    m_cpuCycle;            // Current CPU cycle
+namespace ns3 {
 
-    uint64_t    m_cpuReqCnt;           // Total requests processed
-    uint64_t    m_cpuRespCnt;          // Total responses received
+/**
+ * @brief CPU Core Generator with Out-of-Order execution support
+ */
+class CpuCoreGenerator : public ns3::Object {
+private:
+    // Core configuration
+    uint32_t m_coreId;              // Core identifier
+    double m_dt;                    // Clock period
+    double m_clkSkew;               // Clock skew
+    
+    // Trace file handling
+    std::string m_bmFileName;       // Benchmark trace filename
+    std::string m_cpuTraceFileName; // CPU trace output filename
+    std::string m_ctrlsTraceFileName; // Controllers trace filename
+    std::ifstream m_bmTrace;        // Trace file stream
+    std::ofstream m_cpuTrace;       // CPU trace output stream
+    std::ofstream m_ctrlsTrace;     // Controllers trace stream
+    bool m_logFileGenEnable;        // Enable log file generation
+    
+    // Pipeline components
+    CpuFIFO* m_cpuFIFO;            // Interface to memory system
+    ROB* m_rob;                     // Reorder buffer
+    LSQ* m_lsq;                     // Load-store queue
+    
+    // Execution state
+    uint64_t m_cpuCycle;            // Current CPU cycle
+    uint32_t m_remaining_compute;    // Remaining compute instructions
+    bool m_newSampleRdy;            // New trace line ready
+    bool m_cpuReqDone;              // Trace processing complete
+    bool m_cpuCoreSimDone;          // Simulation complete
+    
+    // Request tracking
+    uint32_t m_sent_requests;       // In-flight memory requests
+    uint32_t m_number_of_OoO_requests; // Maximum in-flight requests
+    CpuFIFO::ReqMsg m_cpuMemReq;    // Current memory request
+    CpuFIFO::RespMsg m_cpuMemResp;  // Current memory response
+    uint32_t m_cpuReqCnt;           // Total requests processed
+    uint32_t m_cpuRespCnt;          // Total responses received
+    
+    // Request timing
+    bool m_prevReqFinish;           // Previous request complete
+    uint64_t m_prevReqFinishCycle;  // Cycle previous request finished
+    uint64_t m_prevReqArriveCycle;  // Cycle previous request arrived
 
-    uint64_t    m_prevReqFinishCycle,  // Cycle when previous request finished
-                m_prevReqArriveCycle;   // Cycle when previous request arrived
-
-    bool        m_prevReqFinish;       // Previous request completion status
-   
-    std::string m_bmFileName;          // Benchmark trace filename
-    std::string m_cpuTraceFileName;    // CPU trace output filename
-    std::string m_CtrlsTraceFileName;  // Controllers trace filename
-
-    CpuFIFO::ReqMsg  m_cpuMemReq;     // Current memory request
-    CpuFIFO::RespMsg m_cpuMemResp;    // Current memory response
- 
-    std::ifstream m_bmTrace;           // Benchmark trace input stream
-    std::ofstream m_cpuTrace;          // CPU trace output stream
-    std::ofstream m_ctrlsTrace;        // Controllers trace output stream
-
-    CpuFIFO* m_cpuFIFO;               // Interface to CPU FIFO
-
-    // Out-of-Order execution components
-    ROB* m_rob;                        // Reorder Buffer
-    LSQ* m_lsq;                        // Load Store Queue
-
-    bool m_cpuReqDone;                // All requests processed flag
-    bool m_newSampleRdy;              // New instruction ready flag
-    bool m_cpuCoreSimDone;            // Simulation complete flag
-    bool m_logFileGenEnable;          // Log file generation enabled
-
-    int m_number_of_OoO_requests;     // Maximum in-flight requests
-    int m_sent_requests;              // Current in-flight requests
-
-    uint32_t m_remaining_compute;   // Track remaining compute instructions
-    bool m_compute_ready;           // Flag for compute count from trace
-
-    uint32_t m_remainingComputeInst;  // Track remaining compute instructions from trace
-
-    /**
-     * @brief Processes transmit buffer operations
-     * 
-     * - Reads new instructions from trace
-     * - Allocates instructions to ROB/LSQ
-     * - Handles compute instruction processing
-     * - Manages memory request transmission
-     */
-    void ProcessTxBuf();
-
-    /**
-     * @brief Processes receive buffer operations
-     * 
-     * - Handles memory responses
-     * - Updates ROB/LSQ status
-     * - Manages instruction completion
-     * - Tracks simulation progress
-     */
-    void ProcessRxBuf();
-
-  public:
-    static TypeId GetTypeId(void);
-
-    /**
-     * @brief Constructor
-     * @param associatedCpuFIFO CPU FIFO interface for cache communication
-     */
+public:
+    static TypeId GetTypeId(void);  // Required by NS3
+    
+    // Constructor/Destructor
     CpuCoreGenerator(CpuFIFO* associatedCpuFIFO);
-
-    ~CpuCoreGenerator();
-
+    virtual ~CpuCoreGenerator();
+    
     // Configuration methods
     void SetBmFileName(std::string bmFileName);
     void SetCpuTraceFile(std::string fileName);
@@ -122,36 +82,24 @@ namespace ns3 {
     void SetClkSkew(double clkSkew);
     void SetLogFileGenEnable(bool logFileGenEnable);
     void SetOutOfOrderStages(int stages);
-
+    
     // Getters
     int GetCoreId();
-    int GetDt();
+    double GetDt();
     bool GetCpuSimDoneFlag();
-
-    /**
-     * @brief Initializes the CPU core generator
-     * 
-     * - Opens trace files
-     * - Initializes ROB and LSQ
-     * - Sets up simulation parameters
-     */
+    
+    // Core functionality
     void init();
-  
-    /**
-     * @brief Main processing step called each clock cycle
-     * 
-     * - Processes new instructions
-     * - Handles ROB/LSQ operations
-     * - Manages memory operations
-     * - Updates simulation state
-     */
+    void ProcessTxBuf();
+    void ProcessRxBuf();
     static void Step(Ptr<CpuCoreGenerator> cpuCoreGenerator);
-
-    // Out-of-Order component setters
+    
+    // Pipeline component setters
     void setROB(ROB* rob) { m_rob = rob; }
     void setLSQ(LSQ* lsq) { m_lsq = lsq; }
-  };
+    void setCpuFIFO(CpuFIFO* fifo) { m_cpuFIFO = fifo; }
+};
 
-}
+} // namespace ns3
 
-#endif /* _CpuCoreGenerator_H */
+#endif // CPU_CORE_GENERATOR_H

@@ -1,138 +1,107 @@
-#include "../header/ROB.h"
+#include "ROB.h"
+#include "LSQ.h"
 
 namespace ns3 {
 
-/**
- * @brief Constructor initializes ROB with default parameters
- * 
- * Pre-allocates space for maximum entries to avoid reallocations
- */
-ROB::ROB() : m_num_entries(0) {
+ROB::ROB() 
+    : m_num_entries(0), 
+      m_lsq(nullptr),
+      m_current_cycle(0) {
     m_rob_q.reserve(MAX_ENTRIES);
+    std::cout << "[ROB] Initialized with " << MAX_ENTRIES << " entries capacity" << std::endl;
 }
 
 ROB::~ROB() {}
 
-/**
- * @brief Main processing step for ROB operations
- * 
- * Called every cycle to retire completed instructions
- * in program order up to IPC limit
- */
 void ROB::step() {
-    std::cout << "\n[ROB] Step - Queue size: " << m_rob_q.size() << "/" << MAX_ENTRIES << std::endl;
-    if (!m_rob_q.empty()) {
-        auto& head = m_rob_q.front();
-        std::cout << "[ROB] Head entry - Type: " << 
-            (head.type == COMPUTE ? "COMPUTE" : (head.type == LOAD ? "LOAD" : "STORE")) <<
-            " MsgId: " << head.msgId << 
-            " Ready: " << head.ready << std::endl;
-    }
+    std::cout << "\n[ROB] Step at cycle " << m_current_cycle << std::endl;
+    std::cout << "[ROB] Current entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
     
-    retire();  // Try to retire instructions
+    // As per 3.4, retire instructions every cycle
+    retire();
 }
 
-/**
- * @brief Check if ROB can accept new entries
- * @return true if space available
- * 
- * Ensures ROB doesn't exceed maximum capacity
- */
 bool ROB::canAccept() {
-    return m_num_entries < MAX_ENTRIES;
+    bool can_accept = m_num_entries < MAX_ENTRIES;
+    std::cout << "[ROB] Can accept new entry: " << (can_accept ? "yes" : "no") 
+              << " (" << m_num_entries << "/" << MAX_ENTRIES << ")" << std::endl;
+    return can_accept;
 }
 
-/**
- * @brief Allocate new instruction in ROB
- * @param request Instruction to allocate
- * @return true if allocation successful
- * 
- * Compute instructions are ready immediately
- * Stores and loads must be marked ready by LSQ
- */
-bool ROB::allocate(uint64_t msgId, ROBEntryType type) {
-    std::cout << "\n[ROB] Attempting to allocate " << 
-        (type == COMPUTE ? "COMPUTE" : (type == LOAD ? "LOAD" : "STORE")) <<
-        " MsgId: " << msgId << std::endl;
-    
+bool ROB::allocate(const CpuFIFO::ReqMsg& request) {
     if (!canAccept()) {
-        std::cout << "[ROB] Cannot allocate - Queue full" << std::endl;
+        std::cout << "[ROB] Allocation failed - ROB full" << std::endl;
         return false;
     }
     
     ROBEntry entry;
-    entry.msgId = msgId;
-    entry.type = type;
-    entry.ready = (type == COMPUTE);  // Compute instructions are ready immediately
+    entry.request = request;
+    entry.allocate_cycle = m_current_cycle;
     
-    if (entry.ready) {
-        std::cout << "[ROB] Compute instruction marked ready immediately" << std::endl;
-    }
+    // As per 3.3.1, compute instructions are ready immediately
+    entry.ready = (request.type == CpuFIFO::REQTYPE::COMPUTE);
     
     m_rob_q.push_back(entry);
     m_num_entries++;
     
+    std::cout << "[ROB] Allocated entry for request " << request.msgId 
+              << " type=" << (int)request.type 
+              << " ready=" << entry.ready << std::endl;
     return true;
 }
 
-/**
- * @brief Retire completed instructions in program order
- * 
- * Retires up to IPC instructions per cycle
- */
 void ROB::retire() {
-    while (!m_rob_q.empty()) {
-        auto& oldest = m_rob_q.front();
+    if (m_rob_q.empty()) {
+        std::cout << "[ROB] No entries to retire" << std::endl;
+        return;
+    }
+    
+    // As per 3.4: ROB is the only class architecturally retiring instructions
+    // Must maintain program order, so check from top of ROB queue
+    uint32_t retired = 0;
+    while (retired < IPC && !m_rob_q.empty()) {
+        ROBEntry& head = m_rob_q.front();
         
-        if (!oldest.ready) {
-            std::cout << "[ROB] Cannot retire - Head entry not ready MsgId: " << oldest.msgId << std::endl;
+        // Stop at first non-ready instruction to maintain program order
+        if (!head.ready) {
+            std::cout << "[ROB] Head entry not ready (request " << head.request.msgId 
+                      << "), stopping retirement to maintain program order" << std::endl;
             break;
         }
         
-        std::cout << "[ROB] Retiring " << 
-            (oldest.type == COMPUTE ? "COMPUTE" : (oldest.type == LOAD ? "LOAD" : "STORE")) <<
-            " MsgId: " << oldest.msgId << std::endl;
+        std::cout << "[ROB] Architecturally retiring request " << head.request.msgId 
+                  << " type=" << (int)head.request.type 
+                  << " allocated at cycle " << head.allocate_cycle << std::endl;
         
-        // For stores, notify LSQ that store can be sent to cache
-        if (oldest.type == STORE) {
-            std::cout << "[ROB] Notifying LSQ that store is committed" << std::endl;
-            m_lsq->commit(oldest.msgId);
+        // For stores, notify LSQ that store can be written to cache
+        if (head.request.type == CpuFIFO::REQTYPE::WRITE && m_lsq) {
+            std::cout << "[ROB] Notifying LSQ to commit store " << head.request.msgId << std::endl;
+            m_lsq->commit(head.request.msgId);
         }
         
-        m_rob_q.pop_front();
+        // Remove from ROB after architectural retirement
+        m_rob_q.erase(m_rob_q.begin());
         m_num_entries--;
+        retired++;
+    }
+    
+    if (retired > 0) {
+        std::cout << "[ROB] Architecturally retired " << retired << " instructions this cycle" << std::endl;
     }
 }
 
-/**
- * @brief Mark instruction as complete
- * @param requestId ID of instruction to commit
- * 
- * Called when:
- * - Load receives data (from cache or forwarding)
- * - Store allocated in LSQ
- * - Compute instruction allocated (immediate)
- */
-void ROB::commit(uint64_t msgId) {
-    std::cout << "\n[ROB] Committing MsgId: " << msgId << std::endl;
-    bool found = false;
+void ROB::commit(uint64_t requestId) {
+    std::cout << "[ROB] Attempting to commit request " << requestId << std::endl;
     
     for (auto& entry : m_rob_q) {
-        if (entry.msgId == msgId) {
-            found = true;
-            if (!entry.ready) {
-                entry.ready = true;
-                std::cout << "[ROB] Marked entry as ready" << std::endl;
-            } else {
-                std::cout << "[ROB] Entry was already ready" << std::endl;
-            }
-            break;
+        if (entry.request.msgId == requestId) {
+            entry.ready = true;
+            std::cout << "[ROB] Marked request " << requestId << " as ready" << std::endl;
+            return;
         }
     }
     
-    if (!found) {
-        std::cout << "[ROB] WARNING: Commit request for unknown MsgId: " << msgId << std::endl;
-    }
+    std::cout << "[ROB] Warning: Request " << requestId << " not found for commit" << std::endl;
 }
 
 } // namespace ns3

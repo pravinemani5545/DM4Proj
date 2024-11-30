@@ -2,123 +2,93 @@
 #define LSQ_H
 
 #include "MemTemplate.h"
-#include "ROB.h"
 #include <vector>
+#include <iostream>
+#include <iomanip>
 
 namespace ns3 {
+
+class ROB; // Forward declaration
 
 /**
  * @brief Load Store Queue (LSQ) implementation for Out-of-Order execution
  * 
- * The LSQ handles memory operations (loads and stores) in an out-of-order processor.
- * It maintains program order for memory operations while allowing out-of-order execution
- * and implements store-to-load forwarding for memory disambiguation.
+ * Requirements from 3.3:
+ * - Fixed size (8 entries)
+ * - Store-to-load forwarding
+ * - Memory ordering
+ * - Coordination with ROB
  */
 class LSQ {
 private:
-    static const uint32_t MAX_ENTRIES = 8;  // Maximum LSQ entries (default)
+    static const uint32_t MAX_ENTRIES = 8;  // Maximum LSQ entries (3.3)
     
     struct LSQEntry {
         CpuFIFO::ReqMsg request;    // Memory request details
-        bool ready;                  // True when operation is complete
+        bool ready;                  // True when operation complete (3.3)
         bool waitingForCache;        // True when waiting for cache response
         bool cache_ack;             // True when cache confirms write complete
+        uint64_t allocate_cycle;    // Cycle when instruction was allocated
     };
     
     uint32_t m_num_entries;         // Current number of entries
     std::vector<LSQEntry> m_lsq_q;  // Queue storing LSQ entries
     CpuFIFO* m_cpuFIFO;            // Interface to CPU FIFO
     ROB* m_rob;                     // Pointer to ROB for coordination
+    uint64_t m_current_cycle;       // Current CPU cycle
 
 public:
-    LSQ() : m_num_entries(0), m_cpuFIFO(nullptr), m_rob(nullptr) {
-        m_lsq_q.reserve(MAX_ENTRIES);
-    }
-    ~LSQ() {}
+    LSQ();
+    ~LSQ();
     
-    /**
-     * @brief Called every cycle to process LSQ operations
-     * Handles pushing stores to cache and receiving load responses
-     */
-    void step();
-
-    /**
-     * @brief Checks if LSQ can accept a new entry
-     * @return true if LSQ has space for new entry
-     */
-    bool canAccept();
-
-    /**
-     * @brief Allocates a new entry in LSQ
-     * @param request Memory request to allocate
-     * @return true if allocation successful
-     */
-    bool allocate(const CpuFIFO::ReqMsg& request);
-
-    /**
-     * @brief Retires completed memory operations
-     * - Loads are retired when data is received or forwarded
-     * - Stores are retired when cache confirms write complete
-     */
-    void retire();
-
-    /**
-     * @brief Implements store-to-load forwarding
-     * @param address Memory address to check for forwarding
-     * @return true if forwarding occurred
-     */
-    bool ldFwd(uint64_t address);
-
-    /**
-     * @brief Marks a request as complete/ready
-     * @param requestId ID of request to commit
-     */
-    void commit(uint64_t requestId);
-
-    /**
-     * @brief Pushes oldest store operation to cache
-     * Called during step() to handle store operations
-     */
-    void pushToCache();
-
-    /**
-     * @brief Processes responses from cache
-     * Called during step() to handle load responses
-     */
-    void rxFromCache();
-
-    /**
-     * @brief Sets the CPU FIFO interface for cache communication
-     * @param fifo Pointer to CPU FIFO
-     */
-    void setCpuFIFO(CpuFIFO* fifo) { m_cpuFIFO = fifo; }
-
-    /**
-     * @brief Sets the ROB interface for coordination
-     * @param rob Pointer to ROB
-     */
-    void setROB(ROB* rob) { m_rob = rob; }
-
-    /**
-     * @brief Checks if LSQ is empty
-     * @return true if no entries in LSQ
-     */
+    // Core functionality (3.3)
+    void step();                    // Called every cycle
+    bool canAccept();              // Check if LSQ can accept new entry
+    bool allocate(const CpuFIFO::ReqMsg& request); // Allocate new memory operation
+    void retire();                 // Remove completed operations
+    bool ldFwd(uint64_t address); // Check store-to-load forwarding (3.3)
+    void commit(uint64_t requestId); // Handle operation completion
+    
+    // Memory system interface (3.3)
+    void pushToCache();           // Send store to cache
+    void rxFromCache();           // Handle cache response
+    
+    // Utility functions
+    void setCpuFIFO(CpuFIFO* fifo) { 
+        m_cpuFIFO = fifo;
+        std::cout << "[LSQ] CPU FIFO connection established" << std::endl;
+    }
+    
+    void setROB(ROB* rob) { 
+        m_rob = rob;
+        std::cout << "[LSQ] ROB connection established" << std::endl;
+    }
+    
+    void setCycle(uint64_t cycle) { m_current_cycle = cycle; }
     bool isEmpty() const { return m_lsq_q.empty(); }
-
-    /**
-     * @brief Gets current number of entries in LSQ
-     * @return Number of entries
-     */
     uint32_t size() const { return m_num_entries; }
-
-    /**
-     * @brief Removes the most recently added entry
-     * Used for cleanup if ROB allocation fails
-     */
+    
     void removeLastEntry() {
         if (!m_lsq_q.empty()) {
             m_lsq_q.pop_back();
             m_num_entries--;
+            std::cout << "[LSQ] Removed last entry, size now: " << m_num_entries << std::endl;
+        }
+    }
+    
+    // Debug support
+    void printState() const {
+        std::cout << "\n[LSQ] Current State:" << std::endl;
+        std::cout << "  Entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
+        std::cout << "  Queue contents:" << std::endl;
+        for (size_t i = 0; i < m_lsq_q.size(); i++) {
+            const auto& entry = m_lsq_q[i];
+            std::cout << "    [" << i << "] ID: " << entry.request.msgId
+                      << " Type: " << (int)entry.request.type
+                      << " Ready: " << (entry.ready ? "Yes" : "No")
+                      << " WaitCache: " << (entry.waitingForCache ? "Yes" : "No")
+                      << " CacheAck: " << (entry.cache_ack ? "Yes" : "No")
+                      << " Cycle: " << entry.allocate_cycle << std::endl;
         }
     }
 };

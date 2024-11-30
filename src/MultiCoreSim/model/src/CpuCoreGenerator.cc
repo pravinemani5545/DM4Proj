@@ -8,6 +8,8 @@
  */
 
 #include "../header/CpuCoreGenerator.h"
+#include "../header/Logger.h"
+#include <sstream>
 
 namespace ns3 {
 
@@ -27,35 +29,39 @@ namespace ns3 {
      * - Out-of-Order components (ROB, LSQ)
      * - Simulation state flags
      */
-    CpuCoreGenerator::CpuCoreGenerator(CpuFIFO* associatedCpuFIFO) {
-        m_cpuFIFO = associatedCpuFIFO;
-        m_coreId = 0;
-        m_dt = 1;
-        m_clkSkew = 0;
-        m_cpuCycle = 0;
-        m_cpuReqCnt = 0;
-        m_cpuRespCnt = 0;
-        m_prevReqFinish = true;
-        m_prevReqFinishCycle = 0;
-        m_prevReqArriveCycle = 0;
-        m_cpuReqDone = false;
-        m_newSampleRdy = false;
-        m_cpuCoreSimDone = false;
-        m_logFileGenEnable = false;
-        m_number_of_OoO_requests = 0;
-        m_sent_requests = 0;
-        m_remainingComputeInst = 0;
-        
-        // Initialize Out-of-Order execution components
-        m_rob = new ROB();
-        m_lsq = new LSQ();
-        m_lsq->setCpuFIFO(m_cpuFIFO);
-        m_lsq->setROB(m_rob);
+    CpuCoreGenerator::CpuCoreGenerator(CpuFIFO* associatedCpuFIFO) 
+        : m_coreId(0),
+          m_cpuCycle(0),
+          m_remaining_compute(0),
+          m_newSampleRdy(false),
+          m_cpuReqDone(false),
+          m_sent_requests(0),
+          m_number_of_OoO_requests(16),  // Default value
+          m_cpuReqCnt(0),
+          m_cpuRespCnt(0),
+          m_prevReqFinish(true),
+          m_prevReqFinishCycle(0),
+          m_prevReqArriveCycle(0),
+          m_dt(1),
+          m_cpuFIFO(associatedCpuFIFO),
+          m_rob(nullptr),
+          m_lsq(nullptr),
+          m_logFileGenEnable(false),
+          m_cpuCoreSimDone(false) {
+              
+        std::cout << "[CPU] Initializing Core " << m_coreId << std::endl;
     }
 
     CpuCoreGenerator::~CpuCoreGenerator() {
-        delete m_rob;
-        delete m_lsq;
+        if (m_bmTrace.is_open()) {
+            m_bmTrace.close();
+        }
+        if (m_cpuTrace.is_open()) {
+            m_cpuTrace.close();
+        }
+        if (m_ctrlsTrace.is_open()) {
+            m_ctrlsTrace.close();
+        }
     }
 
     // Configuration methods
@@ -68,7 +74,7 @@ namespace ns3 {
     }
 
     void CpuCoreGenerator::SetCtrlsTraceFile(std::string fileName) {
-        m_CtrlsTraceFileName = fileName;
+        m_ctrlsTraceFileName = fileName;
     }
 
     void CpuCoreGenerator::SetCoreId(int coreId) {
@@ -83,7 +89,7 @@ namespace ns3 {
         m_dt = dt;
     }
 
-    int CpuCoreGenerator::GetDt() {
+    double CpuCoreGenerator::GetDt() {
         return m_dt;
     }
 
@@ -114,6 +120,16 @@ namespace ns3 {
      */
     void CpuCoreGenerator::init() {
         m_bmTrace.open(m_bmFileName.c_str());
+        if (!m_bmTrace.is_open()) {
+            std::cerr << "[CPU] ERROR: Could not open trace file " << m_bmFileName << std::endl;
+            throw std::runtime_error("Failed to open trace file");
+        }
+        
+        if (m_logFileGenEnable) {
+            m_cpuTrace.open(m_cpuTraceFileName.c_str());
+            m_ctrlsTrace.open(m_ctrlsTraceFileName.c_str());
+        }
+        
         Simulator::Schedule(NanoSeconds(m_clkSkew), &CpuCoreGenerator::Step, Ptr<CpuCoreGenerator>(this));
     }
 
@@ -132,95 +148,145 @@ namespace ns3 {
      * - Mark ready status appropriately
      */
     void CpuCoreGenerator::ProcessTxBuf() {
-        // First handle compute instructions if any remaining
+        std::cout << "\n[CPU] Core " << m_coreId << " Cycle " << m_cpuCycle << std::endl;
+        
+        // First check LSQ for stores ready to commit to cache
+        if (m_lsq && m_cpuFIFO && !m_cpuFIFO->m_txFIFO.IsFull()) {
+            m_lsq->pushToCache();
+        }
+        
+        std::cout << "[CPU] In-flight requests: " << m_sent_requests << "/" 
+                  << m_number_of_OoO_requests << std::endl;
+        
+        // First handle any remaining compute instructions from previous line
         if (m_remaining_compute > 0) {
-            if (m_rob->canAccept()) {
+            std::cout << "[CPU] Processing compute instructions (" 
+                      << m_remaining_compute << " remaining)" << std::endl;
+                  
+            // Try to allocate as many compute instructions as possible
+            while (m_remaining_compute > 0 && m_rob && m_rob->canAccept()) {
                 // Create compute instruction request
                 CpuFIFO::ReqMsg compute_req;
+                compute_req.msgId = m_cpuReqCnt++;
+                compute_req.reqCoreId = m_coreId;
                 compute_req.type = CpuFIFO::REQTYPE::COMPUTE;
                 compute_req.addr = 0;  // Special value for compute
-                compute_req.msgId = IdGenerator::nextReqId();
-                compute_req.reqCoreId = m_coreId;
                 compute_req.cycle = m_cpuCycle;
-                compute_req.fifoInserionCycle = m_cpuCycle;
+                compute_req.ready = true;  // Compute instructions are ready immediately
                 
-                std::cout << "Processing compute instruction " << m_remaining_compute 
-                         << " remaining, msgId: " << compute_req.msgId << std::endl;
-                
-                // Allocate in ROB (will be marked ready immediately)
+                // Try to allocate in ROB
                 if (m_rob->allocate(compute_req)) {
                     m_remaining_compute--;
-                    m_cpuReqCnt++;
-                }
-                return;  // Process one instruction per cycle
-            }
-            return;  // Can't proceed to memory ops until compute instructions done
-        }
-
-        // Then handle memory operations
-        if (!m_cpuFIFO->m_txFIFO.IsFull() && !m_cpuReqDone && m_sent_requests < m_number_of_OoO_requests) {
-            if (!m_newSampleRdy) {
-                std::string fline;
-                if (getline(m_bmTrace, fline)) {
-                    // Parse new trace format: [compute_count] [addr] [type]
-                    std::istringstream iss(fline);
-                    std::string compute_count, addr, type;
-                    
-                    if (!(iss >> compute_count >> addr >> type)) {
-                        return;  // Invalid line format
-                    }
-                    
-                    std::cout << "\nParsed trace line:" << std::endl;
-                    std::cout << "  Compute count: " << compute_count << std::endl;
-                    std::cout << "  Address: 0x" << addr << std::endl;
-                    std::cout << "  Type: " << type << std::endl;
-                    
-                    // Set compute instructions to process before this memory op
-                    m_remaining_compute = std::stoi(compute_count);
-                    
-                    // Setup memory request
-                    m_cpuMemReq.addr = (uint64_t)strtol(addr.c_str(), NULL, 16);
-                    m_cpuMemReq.type = (type == "R") ? 
-                        CpuFIFO::REQTYPE::READ : 
-                        CpuFIFO::REQTYPE::WRITE;
-                    m_cpuMemReq.msgId = IdGenerator::nextReqId();
-                    m_cpuMemReq.reqCoreId = m_coreId;
-                    m_cpuMemReq.cycle = m_cpuCycle;
-                    m_cpuMemReq.fifoInserionCycle = m_cpuCycle;
-                    m_newSampleRdy = true;
-                    
-                    std::cout << "Created memory request:" << std::endl;
-                    std::cout << "  Type: " << (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
-                    std::cout << "  Address: 0x" << std::hex << m_cpuMemReq.addr << std::dec << std::endl;
-                    std::cout << "  MsgId: " << m_cpuMemReq.msgId << std::endl;
-                }
-            }
-
-            // Try to allocate memory operation if ROB and LSQ have space
-            if (m_newSampleRdy && m_rob->canAccept() && m_lsq->canAccept()) {
-                // First allocate in ROB
-                if (m_rob->allocate(m_cpuMemReq)) {
-                    // Then try LSQ
-                    if (m_lsq->allocate(m_cpuMemReq)) {
-                        std::cout << "Successfully allocated memory request in both ROB and LSQ" << std::endl;
-                        m_newSampleRdy = false;
-                        m_sent_requests++;
-                        m_cpuReqCnt++;
-                    } else {
-                        // LSQ allocation failed, rollback ROB
-                        std::cout << "LSQ allocation failed, rolling back ROB" << std::endl;
-                        m_rob->removeLastEntry();
-                    }
+                    m_sent_requests++;
+                    std::cout << "[CPU] Allocated and committed compute instruction " 
+                              << compute_req.msgId << " (ready immediately)" << std::endl;
                 } else {
-                    std::cout << "ROB allocation failed" << std::endl;
+                    std::cout << "[CPU] ROB full, will continue compute allocation next cycle" << std::endl;
+                    break;  // ROB is full, try again next cycle
                 }
             }
+            
+            // If we still have compute instructions, return and try again next cycle
+            if (m_remaining_compute > 0) {
+                return;
+            }
         }
-
-        if (m_bmTrace.eof()) {
-            m_bmTrace.close();
-            m_cpuReqDone = true;
-            std::cout << "Reached end of trace file" << std::endl;
+        
+        // Only proceed to memory instructions if all compute instructions are allocated
+        // Check if we can accept new instructions
+        if (m_sent_requests >= m_number_of_OoO_requests) {
+            std::cout << "[CPU] Maximum in-flight requests reached" << std::endl;
+            return;
+        }
+        
+        // Read new trace line if needed and no pending compute instructions
+        if (!m_newSampleRdy && !m_bmTrace.eof() && m_remaining_compute == 0) {
+            std::string line;
+            if (std::getline(m_bmTrace, line)) {
+                std::cout << "[CPU] Read trace line: " << line << std::endl;
+                
+                std::istringstream iss(line);
+                uint32_t compute_count;
+                std::string type;
+                uint64_t addr;
+                
+                if (iss >> std::dec >> compute_count >> type >> std::hex >> addr) {
+                    m_remaining_compute = compute_count;
+                    std::cout << "[CPU] Found " << compute_count << " compute instructions" << std::endl;
+                    
+                    // If we have compute instructions, handle them first
+                    if (compute_count > 0) {
+                        return;  // Process compute instructions next cycle
+                    }
+                    
+                    // Otherwise setup memory request if present
+                    if (type != "c") {
+                        m_cpuMemReq.msgId = m_cpuReqCnt++;
+                        m_cpuMemReq.reqCoreId = m_coreId;
+                        m_cpuMemReq.addr = addr;
+                        m_cpuMemReq.cycle = m_cpuCycle;
+                        m_cpuMemReq.ready = false;
+                        
+                        if (type == "r") {
+                            m_cpuMemReq.type = CpuFIFO::REQTYPE::READ;
+                            std::cout << "[CPU] Parsed LOAD: addr=0x" << std::hex << addr 
+                                      << std::dec << " msgId=" << m_cpuMemReq.msgId << std::endl;
+                        }
+                        else if (type == "w") {
+                            m_cpuMemReq.type = CpuFIFO::REQTYPE::WRITE;
+                            m_cpuMemReq.ready = true;  // Stores ready immediately
+                            std::cout << "[CPU] Store instruction " << m_cpuMemReq.msgId 
+                                      << " will commit upon LSQ allocation" << std::endl;
+                        }
+                        m_newSampleRdy = true;
+                    }
+                }
+                else {
+                    std::cout << "[CPU] Error: Invalid trace format" << std::endl;
+                }
+            }
+            else {
+                m_cpuReqDone = true;
+                std::cout << "[CPU] Reached end of trace file" << std::endl;
+            }
+        }
+        
+        // Try to allocate memory instruction if we have one
+        if (m_newSampleRdy) {
+            if (m_rob && m_lsq && m_rob->canAccept() && m_lsq->canAccept()) {
+                // For loads, check store-to-load forwarding first
+                if (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ) {
+                    bool forwarded = m_lsq->ldFwd(m_cpuMemReq.addr);
+                    if (forwarded) {
+                        m_cpuMemReq.ready = true;  // Load got data from LSQ
+                        std::cout << "[CPU] Load " << m_cpuMemReq.msgId 
+                                  << " committed via store-to-load forwarding" << std::endl;
+                    } else {
+                        std::cout << "[CPU] No matching store found in LSQ for forwarding" << std::endl;
+                    }
+                }
+                
+                // Try ROB first
+                bool rob_ok = m_rob->allocate(m_cpuMemReq);
+                bool lsq_ok = false;
+                
+                if (rob_ok) {
+                    // Then try LSQ
+                    lsq_ok = m_lsq->allocate(m_cpuMemReq);
+                    if (!lsq_ok) {
+                        m_rob->removeLastEntry();  // Rollback ROB allocation
+                        std::cout << "[CPU] LSQ allocation failed - rolled back ROB allocation" << std::endl;
+                    }
+                }
+                
+                if (rob_ok && lsq_ok) {
+                    std::cout << "[CPU] Successfully allocated " 
+                              << (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ ? "LOAD" : "STORE")
+                              << " to ROB and LSQ" << std::endl;
+                    m_sent_requests++;
+                    m_newSampleRdy = false;
+                }
+            }
         }
     }
 
@@ -228,38 +294,44 @@ namespace ns3 {
      * @brief Process receive buffer operations
      * 
      * Handles:
-     * 1. Cache responses
-     *    - Update LSQ and ROB status
-     *    - Track statistics
-     * 2. ROB and LSQ retirement
+     * 1. Data returning from memory system
+     * 2. Committing loads when data arrives
      * 3. Simulation completion check
-     * 4. Next cycle scheduling
      */
     void CpuCoreGenerator::ProcessRxBuf() {
-        // Process cache responses
         if (!m_cpuFIFO->m_rxFIFO.IsEmpty()) {
-            auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
+            m_cpuMemResp = m_cpuFIFO->m_rxFIFO.GetFrontElement();
             m_cpuFIFO->m_rxFIFO.PopElement();
             m_sent_requests--;
             
-            // LSQ will handle marking load as ready and notifying ROB
-            m_lsq->rxFromCache();
+            // For loads: mark as ready in ROB and LSQ
+            // For stores: remove from LSQ (write confirmed)
+            if (m_rob) {
+                m_rob->commit(m_cpuMemResp.msgId);
+                std::cout << "[CPU] Request " << m_cpuMemResp.msgId 
+                          << " committed upon memory system response" << std::endl;
+            }
+            if (m_lsq) {
+                m_lsq->commit(m_cpuMemResp.msgId);  // LSQ will handle based on instruction type
+                std::cout << "[CPU] LSQ notified of memory system response for request " 
+                          << m_cpuMemResp.msgId << std::endl;
+            }
             
-            // Update stats
             m_prevReqFinish = true;
             m_prevReqFinishCycle = m_cpuCycle;
-            m_prevReqArriveCycle = response.reqcycle;
+            m_prevReqArriveCycle = m_cpuMemResp.reqcycle;
             m_cpuRespCnt++;
         }
-
-        // Check for simulation completion
+        
         if (m_cpuReqDone && m_cpuRespCnt >= m_cpuReqCnt) {
             m_cpuCoreSimDone = true;
-            Logger::getLogger()->traceEnd(this->m_coreId);
-            std::cout << "Cpu " << m_coreId << " Simulation End @ processor cycle # " 
-                     << m_cpuCycle << std::endl;
-        } else {
-            // Schedule next cycle
+            Logger::getLogger()->traceEnd(m_coreId);
+            std::cout << "\n[CPU] Core " << m_coreId << " simulation complete at cycle " 
+                      << m_cpuCycle << std::endl;
+            std::cout << "[CPU] Processed " << m_cpuReqCnt << " requests with " 
+                      << m_cpuRespCnt << " responses" << std::endl;
+        }
+        else {
             Simulator::Schedule(NanoSeconds(m_dt), &CpuCoreGenerator::Step, 
                               Ptr<CpuCoreGenerator>(this));
             m_cpuCycle++;
@@ -267,22 +339,47 @@ namespace ns3 {
     }
 
     /**
-     * @brief Main processing step called each clock cycle
-     * @param cpuCoreGenerator Pointer to CPU core
+     * @brief Main step function called each cycle
      * 
-     * Sequence of operations:
-     * 1. Process ROB and LSQ state
-     * 2. Handle instruction processing (TX)
-     * 3. Handle responses and retirement (RX)
-     * 4. Schedule next cycle if needed
+     * Handles:
+     * 1. ROB retirement
+     * 2. LSQ operations
+     * 3. Processing TX and RX buffers
      */
     void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
-        // First process ROB and LSQ steps
-        cpuCoreGenerator->m_rob->step();
-        cpuCoreGenerator->m_lsq->step();
+        std::cout << "\n[CPU] ========== Cycle " << cpuCoreGenerator->m_cpuCycle << " ==========" << std::endl;
         
-        // Then process TX and RX buffers
+        // 1. ROB retirement must happen first (3.4)
+        if (cpuCoreGenerator->m_rob) {
+            cpuCoreGenerator->m_rob->step();  // ROB checks from top and retires ready instructions
+            cpuCoreGenerator->m_rob->printState();
+        }
+        
+        // 2. LSQ operations (3.4.1)
+        if (cpuCoreGenerator->m_lsq) {
+            // Handle LSQ entry removal based on:
+            // - Stores: when cache write confirmed
+            // - Loads: when ready (forwarding or memory)
+            cpuCoreGenerator->m_lsq->step();
+            
+            // First handle any cache responses
+            if (cpuCoreGenerator->m_cpuFIFO && !cpuCoreGenerator->m_cpuFIFO->m_rxFIFO.IsEmpty()) {
+                cpuCoreGenerator->m_lsq->rxFromCache();
+                std::cout << "[CPU] LSQ processed cache response" << std::endl;
+            }
+            
+            // Then try to send stores to cache
+            if (cpuCoreGenerator->m_cpuFIFO && !cpuCoreGenerator->m_cpuFIFO->m_txFIFO.IsFull()) {
+                cpuCoreGenerator->m_lsq->pushToCache();
+                std::cout << "[CPU] LSQ attempting to send store to cache" << std::endl;
+            }
+            
+            cpuCoreGenerator->m_lsq->printState();
+        }
+        
+        // 3. Process new instructions
         cpuCoreGenerator->ProcessTxBuf();
         cpuCoreGenerator->ProcessRxBuf();
     }
 }
+
