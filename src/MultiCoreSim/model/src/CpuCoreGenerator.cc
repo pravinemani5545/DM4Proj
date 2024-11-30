@@ -157,17 +157,6 @@ namespace ns3 {
      * - Mark ready status appropriately
      */
     void CpuCoreGenerator::ProcessTxBuf() {
-        if (m_cpuCycle >= 60) {
-            std::cout << "\n[CPU] ========== Reached cycle limit (60) ==========" << std::endl;
-            std::cout << "[CPU] Final pipeline state:" << std::endl;
-            std::cout << "[CPU] - In-flight requests: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
-            std::cout << "[CPU] - Remaining compute: " << m_remaining_compute << std::endl;
-            std::cout << "[CPU] - Request count: " << m_cpuReqCnt << std::endl;
-            std::cout << "[CPU] - Response count: " << m_cpuRespCnt << std::endl;
-            m_cpuCoreSimDone = true;
-            return;
-        }
-
         std::cout << "\n[CPU] ========== Core " << m_coreId << " Cycle " << m_cpuCycle << " ==========" << std::endl;
         std::cout << "[CPU] Pipeline state:" << std::endl;
         std::cout << "[CPU] - In-flight requests: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
