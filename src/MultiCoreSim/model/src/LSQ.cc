@@ -76,40 +76,19 @@ bool LSQ::allocate(const CpuFIFO::ReqMsg& request) {
 }
 
 bool LSQ::ldFwd(uint64_t address) {
-    std::cout << "[LSQ] Checking store-to-load forwarding for address 0x" 
+    std::cout << "[LSQ] Checking store forwarding for address 0x" 
               << std::hex << address << std::dec << std::endl;
               
-    // As per 3.3.3 case 2: Check for store-to-load forwarding
-    bool found_store = false;
+    // As per 3.3.3: Check for store-to-load forwarding
     for (auto it = m_lsq_q.rbegin(); it != m_lsq_q.rend(); ++it) {
         if (it->request.type == CpuFIFO::REQTYPE::WRITE && 
             it->request.addr == address) {
             
-            std::cout << "[LSQ] Found matching store (ID " << it->request.msgId 
-                      << ") for forwarding" << std::endl;
-            
-            // Mark all subsequent loads to this address as ready
-            for (auto& entry : m_lsq_q) {
-                if (entry.request.type == CpuFIFO::REQTYPE::READ &&
-                    entry.request.addr == address &&
-                    !entry.ready) {
-                    entry.ready = true;
-                    std::cout << "[LSQ] Marking load " << entry.request.msgId 
-                              << " ready through store forwarding" << std::endl;
-                    if (m_rob) {
-                        m_rob->commit(entry.request.msgId);
-                    }
-                }
-            }
-            found_store = true;
-            break;  // Only need youngest matching store
+            std::cout << "[LSQ] Found matching store for forwarding" << std::endl;
+            return true;
         }
     }
-    
-    if (!found_store) {
-        std::cout << "[LSQ] No matching store found for forwarding" << std::endl;
-    }
-    return found_store;
+    return false;
 }
 
 void LSQ::pushToCache() {
@@ -122,24 +101,10 @@ void LSQ::pushToCache() {
         if (entry.request.type == CpuFIFO::REQTYPE::WRITE && 
             entry.ready && !entry.waitingForCache) {
             
-            std::cout << "[LSQ] Pushing store request " << entry.request.msgId 
-                      << " to cache (addr=0x" << std::hex << entry.request.addr 
-                      << std::dec << ")" << std::endl;
-                      
             entry.waitingForCache = true;
             m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
-            break;
-        }
-        // Also send loads that weren't satisfied by forwarding
-        else if (entry.request.type == CpuFIFO::REQTYPE::READ && 
-                 !entry.ready && !entry.waitingForCache) {
-            
-            std::cout << "[LSQ] Pushing load request " << entry.request.msgId 
-                      << " to cache (addr=0x" << std::hex << entry.request.addr 
-                      << std::dec << ")" << std::endl;
-                      
-            entry.waitingForCache = true;
-            m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
+            std::cout << "[LSQ] Pushed store " << entry.request.msgId 
+                      << " to cache" << std::endl;
             break;
         }
     }
@@ -179,32 +144,21 @@ void LSQ::rxFromCache() {
 }
 
 void LSQ::retire() {
-    if (m_lsq_q.empty()) return;
-    
-    // As per 3.4.1: LSQ retire has different semantics - just removes entries
     auto it = m_lsq_q.begin();
     while (it != m_lsq_q.end()) {
         bool can_remove = false;
         
+        // As per 3.4.1: Different removal conditions for loads vs stores
         if (it->request.type == CpuFIFO::REQTYPE::READ) {
-            // For loads: remove when ready (either from cache or forwarding)
-            can_remove = it->ready;
-            if (can_remove) {
-                std::cout << "[LSQ] Removing completed load " << it->request.msgId 
-                          << " (addr=0x" << std::hex << it->request.addr 
-                          << std::dec << ")" << std::endl;
-            }
+            can_remove = it->ready;  // Remove loads when ready
         } else {
-            // For stores: remove only after cache acknowledges write completion
-            can_remove = it->cache_ack;
-            if (can_remove) {
-                std::cout << "[LSQ] Removing completed store " << it->request.msgId 
-                          << " (addr=0x" << std::hex << it->request.addr 
-                          << std::dec << ") - cache write confirmed" << std::endl;
-            }
+            can_remove = it->cache_ack;  // Remove stores after cache ack
         }
         
         if (can_remove) {
+            std::cout << "[LSQ] Removing " 
+                      << (it->request.type == CpuFIFO::REQTYPE::READ ? "load " : "store ")
+                      << it->request.msgId << std::endl;
             it = m_lsq_q.erase(it);
             m_num_entries--;
         } else {
