@@ -320,13 +320,16 @@ namespace ns3 {
      * 3. Simulation completion check
      */
     void CpuCoreGenerator::ProcessRxBuf() {
-        if (!m_cpuFIFO->m_rxFIFO.IsEmpty()) {
+        // First check for any responses in the FIFO
+        while (!m_cpuFIFO->m_rxFIFO.IsEmpty()) {
             m_cpuMemResp = m_cpuFIFO->m_rxFIFO.GetFrontElement();
             m_cpuFIFO->m_rxFIFO.PopElement();
             
             // Protect against underflow
             if (m_sent_requests > 0) {
                 m_sent_requests--;
+                std::cout << "[CPU] Decremented in-flight requests to " << m_sent_requests 
+                          << "/" << m_number_of_OoO_requests << std::endl;
             } else {
                 std::cout << "[CPU] Warning: m_sent_requests underflow prevented" << std::endl;
             }
