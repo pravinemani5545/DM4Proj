@@ -114,36 +114,27 @@ bool LSQ::ldFwd(uint64_t address) {
 }
 
 void LSQ::pushToCache() {
-    if (m_lsq_q.empty() || !m_cpuFIFO || m_cpuFIFO->m_txFIFO.IsFull()) {
-        return;
-    }
-    
-    // Find oldest store ready to send to cache
+    // Check for store operations ready to be sent to cache
     for (auto& entry : m_lsq_q) {
-        if (entry.request.type == CpuFIFO::REQTYPE::WRITE && 
-            entry.ready && !entry.waitingForCache) {
-            
-            std::cout << "[LSQ] Pushing store request " << entry.request.msgId 
-                      << " to cache (addr=0x" << std::hex << entry.request.addr 
-                      << std::dec << ")" << std::endl;
-                      
+        if (entry.request.type == CpuFIFO::ReqMsg::STORE && !entry.waitingForCache) {
+            // Send store to cache
             entry.waitingForCache = true;
-            m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
-            m_rob->getCpu()->notifyRequestSentToCache();  // Notify CPU when request is sent
-            break;
+            if (m_rob && m_rob->getCpu()) {
+                m_rob->getCpu()->notifyRequestSentToCache();  // Notify CPU when request is sent
+            }
+            return;  // Only send one request per cycle
         }
-        // Also send loads that weren't satisfied by forwarding
-        else if (entry.request.type == CpuFIFO::REQTYPE::READ && 
-                 !entry.ready && !entry.waitingForCache) {
-            
-            std::cout << "[LSQ] Pushing load request " << entry.request.msgId 
-                      << " to cache (addr=0x" << std::hex << entry.request.addr 
-                      << std::dec << ")" << std::endl;
-                      
+    }
+
+    // Check for load operations ready to be sent to cache
+    for (auto& entry : m_lsq_q) {
+        if (entry.request.type == CpuFIFO::ReqMsg::LOAD && !entry.waitingForCache) {
+            // Send load to cache
             entry.waitingForCache = true;
-            m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
-            m_rob->getCpu()->notifyRequestSentToCache();  // Notify CPU when request is sent
-            break;
+            if (m_rob && m_rob->getCpu()) {
+                m_rob->getCpu()->notifyRequestSentToCache();  // Notify CPU when request is sent
+            }
+            return;  // Only send one request per cycle
         }
     }
 }

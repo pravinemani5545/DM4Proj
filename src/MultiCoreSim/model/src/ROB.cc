@@ -21,33 +21,11 @@ void ROB::step() {
     std::cout << "[ROB] Current entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
     
     // Print current ROB state
-    if (!m_rob_q.empty()) {
-        std::cout << "[ROB] Current ROB queue state:" << std::endl;
-        for (size_t i = 0; i < m_rob_q.size(); i++) {
-            const ROBEntry& entry = m_rob_q[i];
-            std::cout << "[ROB]   [" << i << "] msgId=" << entry.request.msgId 
-                      << " type=" << (int)entry.request.type
-                      << " ready=" << entry.ready 
-                      << " cycle=" << entry.allocate_cycle << std::endl;
-        }
-    }
+    printState();
     
     // As per 3.4, retire instructions every cycle
     retire();
     m_current_cycle++;
-}
-
-void ROB::printState() const {
-    std::cout << "\n[ROB] Current State:" << std::endl;
-    std::cout << "  Entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
-    std::cout << "  Queue contents:" << std::endl;
-    for (size_t i = 0; i < m_rob_q.size(); i++) {
-        const auto& entry = m_rob_q[i];
-        std::cout << "    [" << i << "] ID: " << entry.request.msgId
-                  << " Type: " << (int)entry.request.type
-                  << " Ready: " << (entry.ready ? "Yes" : "No")
-                  << " Cycle: " << entry.allocate_cycle << std::endl;
-    }
 }
 
 bool ROB::canAccept() {

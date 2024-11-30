@@ -9,6 +9,7 @@
 namespace ns3 {
 
 class LSQ; // Forward declaration
+class CpuCoreGenerator; // Forward declaration for CPU
 
 /**
  * @brief Reorder Buffer (ROB) implementation for Out-of-Order execution
@@ -33,6 +34,7 @@ private:
     uint32_t m_num_entries;         // Current number of entries
     std::vector<ROBEntry> m_rob_q;  // Queue storing ROB entries
     LSQ* m_lsq;                     // Pointer to LSQ for store commits
+    CpuCoreGenerator* m_cpu;        // Pointer to CPU core
     uint64_t m_current_cycle;       // Current CPU cycle
 
 public:
@@ -63,6 +65,13 @@ public:
         m_lsq = lsq;
         std::cout << "[ROB] LSQ connection established" << std::endl;
     }
+    
+    void setCpu(CpuCoreGenerator* cpu) { 
+        m_cpu = cpu;
+        std::cout << "[ROB] CPU connection established" << std::endl;
+    }
+    
+    CpuCoreGenerator* getCpu() const { return m_cpu; }
     
     // Debug support
     void printState() const {

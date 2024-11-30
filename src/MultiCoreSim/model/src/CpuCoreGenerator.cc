@@ -21,34 +21,24 @@ namespace ns3 {
         return tid;
     }
 
-    /**
-     * @brief Constructor initializes CPU core with OoO execution support
-     * @param associatedCpuFIFO Interface to cache system
-     * 
-     * Initializes:
-     * - Core parameters (ID, clock, skew)
-     * - Statistics counters
-     * - Out-of-Order components (ROB, LSQ)
-     * - Simulation state flags
-     */
     CpuCoreGenerator::CpuCoreGenerator(CpuFIFO* associatedCpuFIFO) 
         : m_coreId(0),
           m_cpuCycle(0),
           m_remaining_compute(0),
+          m_dt(1.0),
+          m_logFileGenEnable(false),
           m_newSampleRdy(false),
           m_cpuReqDone(false),
           m_sent_requests(0),
-          m_number_of_OoO_requests(16),  // Default value
+          m_number_of_OoO_requests(16),
           m_cpuReqCnt(0),
           m_cpuRespCnt(0),
           m_prevReqFinish(true),
           m_prevReqFinishCycle(0),
           m_prevReqArriveCycle(0),
-          m_dt(1),
           m_cpuFIFO(associatedCpuFIFO),
           m_rob(nullptr),
           m_lsq(nullptr),
-          m_logFileGenEnable(false),
           m_cpuCoreSimDone(false) {
               
         std::cout << "[CPU] Initializing Core " << m_coreId << std::endl;
@@ -401,22 +391,6 @@ namespace ns3 {
         // Process new instructions
         cpuCoreGenerator->ProcessTxBuf();
         cpuCoreGenerator->ProcessRxBuf();
-    }
-
-    void CpuCoreGenerator::setROB(ROB* rob) { m_rob = rob; }
-    void CpuCoreGenerator::setLSQ(LSQ* lsq) { m_lsq = lsq; }
-    void CpuCoreGenerator::setCpuFIFO(CpuFIFO* fifo) { m_cpuFIFO = fifo; }
-
-    void CpuCoreGenerator::onInstructionRetired(const CpuFIFO::ReqMsg& request) {
-        m_sent_requests--;  // Decrement in-flight count
-        std::cout << "[CPU] Instruction " << request.msgId << " retired, in-flight: " 
-                  << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
-    }
-
-    void CpuCoreGenerator::notifyRequestSentToCache() { 
-        m_sent_requests++;  // Track when request is actually sent to cache
-        std::cout << "[CPU] Request sent to cache, in-flight: " 
-                  << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
     }
 }
 
