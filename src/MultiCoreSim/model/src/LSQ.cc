@@ -20,6 +20,14 @@ LSQ::~LSQ() {}
  * 3. Retire completed operations
  */
 void LSQ::step() {
+    std::cout << "\n[LSQ] Step - Queue size: " << lsq_q.size() << std::endl;
+    if (!lsq_q.empty()) {
+        std::cout << "[LSQ] Head operation - Type: " 
+                  << (lsq_q.front().request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
+                  << " MsgId: " << lsq_q.front().request.msgId 
+                  << " Ready: " << lsq_q.front().ready
+                  << " WaitingForCache: " << lsq_q.front().waitingForCache << std::endl;
+    }
     pushToCache();
     rxFromCache();
     retire();
@@ -138,8 +146,9 @@ void LSQ::pushToCache() {
         if (!entry.waitingForCache) {
             m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
             entry.waitingForCache = true;
-            std::cout << "[LSQ] Pushed memory operation to cache - Type: "
+            std::cout << "[LSQ] Pushed to cache - Type: "
                       << (entry.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
+                      << " MsgId: " << entry.request.msgId
                       << " Address: 0x" << std::hex << entry.request.addr << std::dec << std::endl;
         }
     }
@@ -160,13 +169,17 @@ void LSQ::rxFromCache() {
         
         std::cout << "[LSQ] Received cache response for MsgId: " << response.msgId << std::endl;
         
-        // Mark matching request as ready
+        bool found = false;
         for (auto& entry : lsq_q) {
             if (entry.request.msgId == response.msgId) {
                 entry.ready = true;
-                std::cout << "[LSQ] Marked memory operation ready from cache response" << std::endl;
+                found = true;
+                std::cout << "[LSQ] Marked operation ready from cache response - MsgId: " << response.msgId << std::endl;
                 break;
             }
+        }
+        if (!found) {
+            std::cout << "[LSQ] WARNING: Could not find operation MsgId: " << response.msgId << " for cache response" << std::endl;
         }
     }
 }

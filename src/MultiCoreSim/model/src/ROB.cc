@@ -20,6 +20,14 @@ ROB::~ROB() {}
  * in program order up to IPC limit
  */
 void ROB::step() {
+    std::cout << "\n[ROB] Step - Queue size: " << rob_q.size() << std::endl;
+    if (!rob_q.empty()) {
+        std::cout << "[ROB] Head instruction - Type: " 
+                  << (rob_q.front().request.type == CpuFIFO::REQTYPE::COMPUTE ? "COMPUTE" :
+                      rob_q.front().request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
+                  << " MsgId: " << rob_q.front().request.msgId 
+                  << " Ready: " << rob_q.front().ready << std::endl;
+    }
     retire();
 }
 
@@ -60,6 +68,7 @@ bool ROB::allocate(const CpuFIFO::ReqMsg& request) {
     std::cout << "[ROB] Allocated instruction - Type: " 
               << (request.type == CpuFIFO::REQTYPE::COMPUTE ? "COMPUTE" :
                   request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
+              << " MsgId: " << request.msgId 
               << " Ready: " << entry.ready << std::endl;
     return true;
 }
@@ -108,12 +117,17 @@ void ROB::retire() {
  * - Compute instruction allocated (immediate)
  */
 void ROB::commit(uint64_t requestId) {
+    bool found = false;
     for (auto& entry : rob_q) {
         if (entry.request.msgId == requestId) {
             entry.ready = true;
+            found = true;
             std::cout << "[ROB] Committed instruction MsgId: " << requestId << std::endl;
             break;
         }
+    }
+    if (!found) {
+        std::cout << "[ROB] WARNING: Could not find instruction MsgId: " << requestId << " to commit" << std::endl;
     }
 }
 
