@@ -116,7 +116,7 @@ bool LSQ::ldFwd(uint64_t address) {
 void LSQ::pushToCache() {
     // Check for store operations ready to be sent to cache
     for (auto& entry : m_lsq_q) {
-        if (entry.request.type == CpuFIFO::ReqMsg::STORE && !entry.waitingForCache) {
+        if (entry.request.type == CpuFIFO::REQTYPE::WRITE && !entry.waitingForCache) {
             // Send store to cache
             entry.waitingForCache = true;
             if (m_rob && m_rob->getCpu()) {
@@ -128,7 +128,7 @@ void LSQ::pushToCache() {
 
     // Check for load operations ready to be sent to cache
     for (auto& entry : m_lsq_q) {
-        if (entry.request.type == CpuFIFO::ReqMsg::LOAD && !entry.waitingForCache) {
+        if (entry.request.type == CpuFIFO::REQTYPE::READ && !entry.waitingForCache) {
             // Send load to cache
             entry.waitingForCache = true;
             if (m_rob && m_rob->getCpu()) {

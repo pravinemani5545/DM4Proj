@@ -23,23 +23,24 @@ namespace ns3 {
 
     CpuCoreGenerator::CpuCoreGenerator(CpuFIFO* associatedCpuFIFO) 
         : m_coreId(0),
+          m_dt(1.0),
+          m_clkSkew(0.0),
+          m_logFileGenEnable(false),
+          m_cpuFIFO(associatedCpuFIFO),
+          m_rob(nullptr),
+          m_lsq(nullptr),
           m_cpuCycle(0),
           m_remaining_compute(0),
-          m_dt(1.0),
-          m_logFileGenEnable(false),
           m_newSampleRdy(false),
           m_cpuReqDone(false),
+          m_cpuCoreSimDone(false),
           m_sent_requests(0),
           m_number_of_OoO_requests(16),
           m_cpuReqCnt(0),
           m_cpuRespCnt(0),
           m_prevReqFinish(true),
           m_prevReqFinishCycle(0),
-          m_prevReqArriveCycle(0),
-          m_cpuFIFO(associatedCpuFIFO),
-          m_rob(nullptr),
-          m_lsq(nullptr),
-          m_cpuCoreSimDone(false) {
+          m_prevReqArriveCycle(0) {
               
         std::cout << "[CPU] Initializing Core " << m_coreId << std::endl;
         
