@@ -7,8 +7,8 @@ namespace ns3 {
  * 
  * Pre-allocates space for maximum entries to avoid reallocations
  */
-ROB::ROB() : num_entries(0) {
-    rob_q.reserve(MAX_ENTRIES);
+ROB::ROB() : m_num_entries(0) {
+    m_rob_q.reserve(MAX_ENTRIES);
 }
 
 ROB::~ROB() {}
@@ -20,15 +20,16 @@ ROB::~ROB() {}
  * in program order up to IPC limit
  */
 void ROB::step() {
-    std::cout << "\n[ROB] Step - Queue size: " << rob_q.size() << std::endl;
-    if (!rob_q.empty()) {
-        std::cout << "[ROB] Head instruction - Type: " 
-                  << (rob_q.front().request.type == CpuFIFO::REQTYPE::COMPUTE ? "COMPUTE" :
-                      rob_q.front().request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
-                  << " MsgId: " << rob_q.front().request.msgId 
-                  << " Ready: " << rob_q.front().ready << std::endl;
+    std::cout << "\n[ROB] Step - Queue size: " << m_rob_q.size() << "/" << MAX_ENTRIES << std::endl;
+    if (!m_rob_q.empty()) {
+        auto& head = m_rob_q.front();
+        std::cout << "[ROB] Head entry - Type: " << 
+            (head.type == COMPUTE ? "COMPUTE" : (head.type == LOAD ? "LOAD" : "STORE")) <<
+            " MsgId: " << head.msgId << 
+            " Ready: " << head.ready << std::endl;
     }
-    retire();
+    
+    retire();  // Try to retire instructions
 }
 
 /**
@@ -38,7 +39,7 @@ void ROB::step() {
  * Ensures ROB doesn't exceed maximum capacity
  */
 bool ROB::canAccept() {
-    return num_entries < MAX_ENTRIES;
+    return m_num_entries < MAX_ENTRIES;
 }
 
 /**
@@ -46,77 +47,60 @@ bool ROB::canAccept() {
  * @param request Instruction to allocate
  * @return true if allocation successful
  * 
- * Compute instructions marked ready immediately
- * Memory operations marked ready when completed:
- * - Stores: ready when allocated in LSQ
- * - Loads: ready when data available
+ * Compute instructions are ready immediately
+ * Stores and loads must be marked ready by LSQ
  */
-bool ROB::allocate(const CpuFIFO::ReqMsg& request) {
+bool ROB::allocate(uint64_t msgId, ROBEntryType type) {
+    std::cout << "\n[ROB] Attempting to allocate " << 
+        (type == COMPUTE ? "COMPUTE" : (type == LOAD ? "LOAD" : "STORE")) <<
+        " MsgId: " << msgId << std::endl;
+    
     if (!canAccept()) {
-        std::cout << "[ROB] Cannot allocate - ROB full" << std::endl;
+        std::cout << "[ROB] Cannot allocate - Queue full" << std::endl;
         return false;
     }
-
+    
     ROBEntry entry;
-    entry.request = request;
-    entry.ready = (request.type == CpuFIFO::REQTYPE::COMPUTE || 
-                  request.type == CpuFIFO::REQTYPE::WRITE);
+    entry.msgId = msgId;
+    entry.type = type;
+    entry.ready = (type == COMPUTE);  // Compute instructions are ready immediately
     
-    rob_q.push_back(entry);
-    num_entries++;
+    if (entry.ready) {
+        std::cout << "[ROB] Compute instruction marked ready immediately" << std::endl;
+    }
     
-    std::cout << "[ROB] Allocated instruction - Type: " 
-              << (request.type == CpuFIFO::REQTYPE::COMPUTE ? "COMPUTE" :
-                  request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
-              << " MsgId: " << request.msgId 
-              << " Ready: " << entry.ready << std::endl;
+    m_rob_q.push_back(entry);
+    m_num_entries++;
+    
     return true;
 }
 
 /**
  * @brief Retire completed instructions in program order
  * 
- * Retires up to IPC instructions per cycle:
- * 1. Check if head instruction is ready
- * 2. If ready, remove from ROB
- * 3. Stop at first not-ready instruction
- * 4. Stop after IPC instructions retired
+ * Retires up to IPC instructions per cycle
  */
 void ROB::retire() {
-    uint32_t retired = 0;
-    
-    std::cout << "\n[ROB] Starting retirement cycle:" << std::endl;
-    std::cout << "  - Queue size: " << rob_q.size() << std::endl;
-    std::cout << "  - IPC limit: " << IPC << std::endl;
-    
-    while (!rob_q.empty() && retired < IPC) {
-        auto& front = rob_q.front();
+    while (!m_rob_q.empty()) {
+        auto& oldest = m_rob_q.front();
         
-        std::cout << "\n[ROB] Checking head instruction:" << std::endl;
-        std::cout << "  - Type: " << (front.request.type == CpuFIFO::REQTYPE::COMPUTE ? "COMPUTE" :
-                                    front.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
-        std::cout << "  - MsgId: " << front.request.msgId << std::endl;
-        std::cout << "  - Ready: " << front.ready << std::endl;
-        
-        if (!front.ready) {
-            std::cout << "[ROB] Cannot retire - Head instruction not ready" << std::endl;
-            break;  // Stop at first not-ready instruction
+        if (!oldest.ready) {
+            std::cout << "[ROB] Cannot retire - Head entry not ready MsgId: " << oldest.msgId << std::endl;
+            break;
         }
         
-        std::cout << "[ROB] Retiring instruction - Type: "
-                  << (front.request.type == CpuFIFO::REQTYPE::COMPUTE ? "COMPUTE" :
-                      front.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
-                  << " MsgId: " << front.request.msgId << std::endl;
+        std::cout << "[ROB] Retiring " << 
+            (oldest.type == COMPUTE ? "COMPUTE" : (oldest.type == LOAD ? "LOAD" : "STORE")) <<
+            " MsgId: " << oldest.msgId << std::endl;
         
-        rob_q.erase(rob_q.begin());
-        num_entries--;
-        retired++;
+        // For stores, notify LSQ that store can be sent to cache
+        if (oldest.type == STORE) {
+            std::cout << "[ROB] Notifying LSQ that store is committed" << std::endl;
+            m_lsq->commit(oldest.msgId);
+        }
         
-        std::cout << "  - Instructions retired this cycle: " << retired << "/" << IPC << std::endl;
-    }
-    
-    if (retired > 0) {
-        std::cout << "[ROB] Retired " << retired << " instructions this cycle" << std::endl;
+        m_rob_q.pop_front();
+        m_num_entries--;
     }
 }
 
@@ -129,18 +113,25 @@ void ROB::retire() {
  * - Store allocated in LSQ
  * - Compute instruction allocated (immediate)
  */
-void ROB::commit(uint64_t requestId) {
+void ROB::commit(uint64_t msgId) {
+    std::cout << "\n[ROB] Committing MsgId: " << msgId << std::endl;
     bool found = false;
-    for (auto& entry : rob_q) {
-        if (entry.request.msgId == requestId) {
-            entry.ready = true;
+    
+    for (auto& entry : m_rob_q) {
+        if (entry.msgId == msgId) {
             found = true;
-            std::cout << "[ROB] Committed instruction MsgId: " << requestId << std::endl;
+            if (!entry.ready) {
+                entry.ready = true;
+                std::cout << "[ROB] Marked entry as ready" << std::endl;
+            } else {
+                std::cout << "[ROB] Entry was already ready" << std::endl;
+            }
             break;
         }
     }
+    
     if (!found) {
-        std::cout << "[ROB] WARNING: Could not find instruction MsgId: " << requestId << " to commit" << std::endl;
+        std::cout << "[ROB] WARNING: Commit request for unknown MsgId: " << msgId << std::endl;
     }
 }
 

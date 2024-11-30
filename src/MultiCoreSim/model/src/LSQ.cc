@@ -7,7 +7,9 @@ namespace ns3 {
  * 
  * Sets maximum entries to 16 and initializes empty queue
  */
-LSQ::LSQ() : MAX_ENTRIES(16), num_entries(0), m_cpuFIFO(nullptr) {}
+LSQ::LSQ() : m_num_entries(0), m_cpuFIFO(nullptr), m_rob(nullptr) {
+    m_lsq_q.reserve(MAX_ENTRIES);
+}
 
 LSQ::~LSQ() {}
 
@@ -20,17 +22,20 @@ LSQ::~LSQ() {}
  * 3. Retire completed operations
  */
 void LSQ::step() {
-    std::cout << "\n[LSQ] Step - Queue size: " << lsq_q.size() << std::endl;
-    if (!lsq_q.empty()) {
-        std::cout << "[LSQ] Head operation - Type: " 
-                  << (lsq_q.front().request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
-                  << " MsgId: " << lsq_q.front().request.msgId 
-                  << " Ready: " << lsq_q.front().ready
-                  << " WaitingForCache: " << lsq_q.front().waitingForCache << std::endl;
+    std::cout << "\n[LSQ] Step - Queue size: " << m_lsq_q.size() << "/" << MAX_ENTRIES << std::endl;
+    if (!m_lsq_q.empty()) {
+        auto& head = m_lsq_q.front();
+        std::cout << "[LSQ] Head operation - Type: " << 
+            (head.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") <<
+            " MsgId: " << head.request.msgId << 
+            " Ready: " << head.ready << 
+            " WaitingForCache: " << head.waitingForCache <<
+            " CacheAck: " << head.cache_ack << std::endl;
     }
-    pushToCache();
-    rxFromCache();
-    retire();
+    
+    pushToCache();  // Push memory operations to cache
+    rxFromCache();  // Process cache responses
+    retire();       // Remove completed operations
 }
 
 /**
@@ -40,7 +45,7 @@ void LSQ::step() {
  * Ensures LSQ doesn't exceed maximum capacity
  */
 bool LSQ::canAccept() {
-    return num_entries < MAX_ENTRIES;
+    return m_num_entries < MAX_ENTRIES;
 }
 
 /**
@@ -52,29 +57,47 @@ bool LSQ::canAccept() {
  * Loads are marked not ready until data received
  */
 bool LSQ::allocate(const CpuFIFO::ReqMsg& request) {
+    std::cout << "\n[LSQ] Attempting to allocate " << 
+        (request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") <<
+        " MsgId: " << request.msgId << 
+        " Address: 0x" << std::hex << request.addr << std::dec << std::endl;
+    
     if (!canAccept()) {
-        std::cout << "[LSQ] Cannot allocate - LSQ full" << std::endl;
+        std::cout << "[LSQ] Cannot allocate - Queue full" << std::endl;
         return false;
     }
-
+    
     LSQEntry entry;
     entry.request = request;
     entry.waitingForCache = false;
+    entry.cache_ack = false;
     
-    // For READ operations, check store forwarding before allocation
+    // For loads, check store forwarding before allocation
     if (request.type == CpuFIFO::REQTYPE::READ) {
-        entry.ready = ldFwd(request.addr);  // Mark ready if forwarding succeeds
-    } else {
-        entry.ready = (request.type == CpuFIFO::REQTYPE::WRITE);  // Stores ready immediately
+        // Search from youngest to oldest for matching store
+        for (auto it = m_lsq_q.rbegin(); it != m_lsq_q.rend(); ++it) {
+            if (it->request.type == CpuFIFO::REQTYPE::WRITE && 
+                it->request.addr == request.addr) {
+                std::cout << "[LSQ] Found forwarding opportunity from store MsgId: " << 
+                    it->request.msgId << std::endl;
+                entry.ready = true;
+                break;
+            }
+        }
+    } else if (request.type == CpuFIFO::REQTYPE::WRITE) {
+        entry.ready = true;
+        std::cout << "[LSQ] Store marked ready immediately" << std::endl;
     }
     
-    lsq_q.push_back(entry);
-    num_entries++;
+    m_lsq_q.push_back(entry);
+    m_num_entries++;
     
-    std::cout << "[LSQ] Allocated memory operation - Type: " 
-              << (request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
-              << " Address: 0x" << std::hex << request.addr << std::dec 
-              << " Ready: " << entry.ready << std::endl;
+    // If load was forwarded or if it's a store, notify ROB
+    if (entry.ready) {
+        std::cout << "[LSQ] Notifying ROB - Operation ready MsgId: " << request.msgId << std::endl;
+        m_rob->commit(request.msgId);
+    }
+    
     return true;
 }
 
@@ -86,34 +109,30 @@ bool LSQ::allocate(const CpuFIFO::ReqMsg& request) {
  * - Stores: ready when allocated (removed after cache confirms)
  */
 void LSQ::retire() {
-    if (lsq_q.empty()) return;
+    if (m_lsq_q.empty()) return;
     
-    auto& front = lsq_q.front();
-    bool can_retire = false;
-
-    std::cout << "\n[LSQ] Checking retirement for head operation:" << std::endl;
+    auto& front = m_lsq_q.front();
+    bool can_remove = false;
+    
+    std::cout << "[LSQ] Checking retirement for head operation:" << std::endl;
     std::cout << "  - Type: " << (front.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
     std::cout << "  - MsgId: " << front.request.msgId << std::endl;
     std::cout << "  - Address: 0x" << std::hex << front.request.addr << std::dec << std::endl;
     std::cout << "  - Ready: " << front.ready << std::endl;
     std::cout << "  - WaitingForCache: " << front.waitingForCache << std::endl;
-
+    
     if (front.request.type == CpuFIFO::REQTYPE::READ) {
-        can_retire = front.ready;
-        std::cout << "  - Load can retire: " << can_retire << " (ready from cache or forwarding)" << std::endl;
-    } else {
-        can_retire = front.ready && !front.waitingForCache;
-        std::cout << "  - Store can retire: " << can_retire << " (ready && cache confirmed)" << std::endl;
+        can_remove = front.ready;  // Loads removed when ready (data received or forwarded)
+        std::cout << "  - Load can retire: " << can_remove << " (ready)" << std::endl;
+    } else if (front.request.type == CpuFIFO::REQTYPE::WRITE) {
+        can_remove = front.cache_ack;  // Stores removed when cache confirms write
+        std::cout << "  - Store can retire: " << can_remove << " (cache confirmed)" << std::endl;
     }
     
-    if (can_retire) {
-        std::cout << "[LSQ] Retiring memory operation - Type: "
-                  << (front.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE")
-                  << " Address: 0x" << std::hex << front.request.addr 
-                  << " MsgId: " << front.request.msgId << std::dec << std::endl;
-        
-        lsq_q.erase(lsq_q.begin());
-        num_entries--;
+    if (can_remove) {
+        std::cout << "[LSQ] Removing operation MsgId: " << front.request.msgId << std::endl;
+        m_lsq_q.erase(m_lsq_q.begin());
+        m_num_entries--;
     }
 }
 
@@ -126,29 +145,30 @@ void LSQ::retire() {
  * Returns true if ready store to same address found
  */
 bool LSQ::ldFwd(uint64_t address) {
-    // Search LSQ from youngest to oldest for matching store
-    for (auto it = lsq_q.rbegin(); it != lsq_q.rend(); ++it) {
+    std::cout << "\n[LSQ] Checking store forwarding for address: 0x" << std::hex << address << std::dec << std::endl;
+    
+    // Search from youngest to oldest for matching store
+    for (auto it = m_lsq_q.rbegin(); it != m_lsq_q.rend(); ++it) {
         if (it->request.type == CpuFIFO::REQTYPE::WRITE && 
             it->request.addr == address) {
-            std::cout << "[LSQ] Store-to-load forwarding hit - Address: 0x" 
-                      << std::hex << address << std::dec 
-                      << " Store MsgId: " << it->request.msgId << std::endl;
+            std::cout << "[LSQ] Found matching store MsgId: " << it->request.msgId << std::endl;
             
-            // Mark the load as ready since forwarding succeeded
-            for (auto& entry : lsq_q) {
+            // Found youngest matching store - mark load as ready
+            for (auto& entry : m_lsq_q) {
                 if (entry.request.type == CpuFIFO::REQTYPE::READ && 
-                    entry.request.addr == address) {
+                    entry.request.addr == address &&
+                    !entry.ready) {
+                    std::cout << "[LSQ] Forwarding to load MsgId: " << entry.request.msgId << std::endl;
                     entry.ready = true;
-                    std::cout << "[LSQ] Marked load ready from forwarding - MsgId: " 
-                              << entry.request.msgId << std::endl;
+                    m_rob->commit(entry.request.msgId);
                 }
             }
-            return true;
+            return true;  // Found and forwarded from youngest store
         }
     }
-    std::cout << "[LSQ] No store-to-load forwarding hit - Address: 0x" 
-              << std::hex << address << std::dec << std::endl;
-    return false;
+    
+    std::cout << "[LSQ] No matching store found for forwarding" << std::endl;
+    return false;  // No matching store found
 }
 
 /**
@@ -160,10 +180,9 @@ bool LSQ::ldFwd(uint64_t address) {
  * - Load hits in store buffer (forwarding)
  */
 void LSQ::commit(uint64_t requestId) {
-    for (auto& entry : lsq_q) {
+    for (auto& entry : m_lsq_q) {
         if (entry.request.msgId == requestId) {
             entry.ready = true;
-            std::cout << "[LSQ] Committed memory operation MsgId: " << requestId << std::endl;
             break;
         }
     }
@@ -178,28 +197,31 @@ void LSQ::commit(uint64_t requestId) {
  * 3. Operation not already waiting
  */
 void LSQ::pushToCache() {
-    if (!m_cpuFIFO || m_cpuFIFO->m_txFIFO.IsFull() || lsq_q.empty()) {
+    if (!m_cpuFIFO || m_cpuFIFO->m_txFIFO.IsFull() || m_lsq_q.empty()) {
+        if (m_cpuFIFO && m_cpuFIFO->m_txFIFO.IsFull()) {
+            std::cout << "[LSQ] Cannot push to cache - txFIFO full" << std::endl;
+        }
         return;
     }
     
-    // Only process oldest entry
-    auto& oldest = lsq_q.front();
-    
-    // For READ operations: only send to cache if not ready (no store forwarding hit)
-    if (oldest.request.type == CpuFIFO::REQTYPE::READ && 
-        !oldest.waitingForCache && !oldest.ready) {
-        m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
-        oldest.waitingForCache = true;
-        std::cout << "[LSQ] Pushed load to cache - MsgId: " << oldest.request.msgId 
-                  << " Address: 0x" << std::hex << oldest.request.addr << std::dec << std::endl;
-    }
-    // For WRITE operations: send to cache when at head of queue
-    else if (oldest.request.type == CpuFIFO::REQTYPE::WRITE && 
-             !oldest.waitingForCache) {
-        m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
-        oldest.waitingForCache = true;
-        std::cout << "[LSQ] Pushed store to cache - MsgId: " << oldest.request.msgId 
-                  << " Address: 0x" << std::hex << oldest.request.addr << std::dec << std::endl;
+    auto& oldest = m_lsq_q.front();
+    if (!oldest.waitingForCache) {
+        if (oldest.request.type == CpuFIFO::REQTYPE::WRITE) {
+            if (oldest.ready && !oldest.cache_ack) {
+                std::cout << "[LSQ] Pushing store to cache - MsgId: " << oldest.request.msgId << 
+                    " Address: 0x" << std::hex << oldest.request.addr << std::dec << std::endl;
+                m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
+                oldest.waitingForCache = true;
+            } else {
+                std::cout << "[LSQ] Store not ready for cache - MsgId: " << oldest.request.msgId << 
+                    " Ready: " << oldest.ready << " CacheAck: " << oldest.cache_ack << std::endl;
+            }
+        } else if (oldest.request.type == CpuFIFO::REQTYPE::READ && !oldest.ready) {
+            std::cout << "[LSQ] Pushing load to cache - MsgId: " << oldest.request.msgId << 
+                " Address: 0x" << std::hex << oldest.request.addr << std::dec << std::endl;
+            m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
+            oldest.waitingForCache = true;
+        }
     }
 }
 
@@ -212,24 +234,32 @@ void LSQ::pushToCache() {
  * 3. Mark entry as ready
  */
 void LSQ::rxFromCache() {
-    if (m_cpuFIFO && !m_cpuFIFO->m_rxFIFO.IsEmpty()) {
-        auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
-        m_cpuFIFO->m_rxFIFO.PopElement();
-        
-        std::cout << "[LSQ] Received cache response for MsgId: " << response.msgId << std::endl;
-        
-        bool found = false;
-        for (auto& entry : lsq_q) {
-            if (entry.request.msgId == response.msgId) {
+    if (!m_cpuFIFO || m_cpuFIFO->m_rxFIFO.IsEmpty()) return;
+    
+    auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
+    m_cpuFIFO->m_rxFIFO.PopElement();
+    
+    std::cout << "[LSQ] Received cache response for MsgId: " << response.msgId << std::endl;
+    
+    bool found = false;
+    for (auto& entry : m_lsq_q) {
+        if (entry.request.msgId == response.msgId) {
+            found = true;
+            if (entry.request.type == CpuFIFO::REQTYPE::READ) {
+                std::cout << "[LSQ] Marking load as ready and notifying ROB - MsgId: " << response.msgId << std::endl;
                 entry.ready = true;
-                found = true;
-                std::cout << "[LSQ] Marked operation ready from cache response - MsgId: " << response.msgId << std::endl;
-                break;
+                m_rob->commit(entry.request.msgId);
+            } else if (entry.request.type == CpuFIFO::REQTYPE::WRITE) {
+                std::cout << "[LSQ] Marking store as acknowledged by cache - MsgId: " << response.msgId << std::endl;
+                entry.cache_ack = true;
             }
+            entry.waitingForCache = false;
+            break;
         }
-        if (!found) {
-            std::cout << "[LSQ] WARNING: Could not find operation MsgId: " << response.msgId << " for cache response" << std::endl;
-        }
+    }
+    
+    if (!found) {
+        std::cout << "[LSQ] WARNING: Received cache response for unknown MsgId: " << response.msgId << std::endl;
     }
 }
 

@@ -77,7 +77,10 @@ namespace ns3 {
     int m_number_of_OoO_requests;     // Maximum in-flight requests
     int m_sent_requests;              // Current in-flight requests
 
-    uint32_t m_remainingComputeInst;  // Remaining compute instructions
+    uint32_t m_remaining_compute;   // Track remaining compute instructions
+    bool m_compute_ready;           // Flag for compute count from trace
+
+    uint32_t m_remainingComputeInst;  // Track remaining compute instructions from trace
 
     /**
      * @brief Processes transmit buffer operations

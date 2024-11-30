@@ -15,6 +15,9 @@ namespace ns3 {
  */
 class ROB {
 private:
+    static const uint32_t MAX_ENTRIES = 32;  // Maximum ROB entries (default)
+    static const uint32_t IPC = 4;           // Instructions retired per cycle (default)
+    
     /**
      * @brief Entry in the ROB containing an instruction and its status
      */
@@ -23,10 +26,8 @@ private:
         bool ready;                  // True when instruction has completed execution
     };
     
-    const uint32_t MAX_ENTRIES = 128;  // Maximum number of ROB entries
-    const uint32_t IPC = 4;            // Instructions retired per cycle
-    uint32_t num_entries;              // Current number of entries
-    std::vector<ROBEntry> rob_q;       // Queue storing ROB entries
+    uint32_t m_num_entries;         // Current number of entries
+    std::vector<ROBEntry> m_rob_q;  // Queue storing ROB entries
 
 public:
     ROB();
@@ -79,13 +80,24 @@ public:
      * @brief Checks if ROB is empty
      * @return true if no entries in ROB
      */
-    bool isEmpty() const { return rob_q.empty(); }
+    bool isEmpty() const { return m_rob_q.empty(); }
 
     /**
      * @brief Gets current number of entries in ROB
      * @return Number of entries
      */
-    uint32_t size() const { return num_entries; }
+    uint32_t size() const { return m_num_entries; }
+
+    /**
+     * @brief Removes the most recently added entry
+     * Used for cleanup if LSQ allocation fails
+     */
+    void removeLastEntry() {
+        if (!m_rob_q.empty()) {
+            m_rob_q.pop_back();
+            m_num_entries--;
+        }
+    }
 };
 
 } // namespace ns3

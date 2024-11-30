@@ -2,6 +2,7 @@
 #define LSQ_H
 
 #include "MemTemplate.h"
+#include "ROB.h"
 #include <vector>
 
 namespace ns3 {
@@ -15,23 +16,25 @@ namespace ns3 {
  */
 class LSQ {
 private:
-    /**
-     * @brief Entry in the LSQ containing a memory request and its status
-     */
+    static const uint32_t MAX_ENTRIES = 8;  // Maximum LSQ entries (default)
+    
     struct LSQEntry {
         CpuFIFO::ReqMsg request;    // Memory request details
-        bool ready;                  // True when operation is complete (data received for loads, store committed)
+        bool ready;                  // True when operation is complete
         bool waitingForCache;        // True when waiting for cache response
+        bool cache_ack;             // True when cache confirms write complete
     };
     
-    uint32_t MAX_ENTRIES;           // Maximum number of entries in LSQ
-    uint32_t num_entries;           // Current number of entries
-    std::vector<LSQEntry> lsq_q;    // Queue storing LSQ entries
-    CpuFIFO* m_cpuFIFO;            // Interface to CPU FIFO for cache communication
+    uint32_t m_num_entries;         // Current number of entries
+    std::vector<LSQEntry> m_lsq_q;  // Queue storing LSQ entries
+    CpuFIFO* m_cpuFIFO;            // Interface to CPU FIFO
+    ROB* m_rob;                     // Pointer to ROB for coordination
 
 public:
-    LSQ();
-    ~LSQ();
+    LSQ() : m_num_entries(0), m_cpuFIFO(nullptr), m_rob(nullptr) {
+        m_lsq_q.reserve(MAX_ENTRIES);
+    }
+    ~LSQ() {}
     
     /**
      * @brief Called every cycle to process LSQ operations
@@ -91,25 +94,31 @@ public:
     void setCpuFIFO(CpuFIFO* fifo) { m_cpuFIFO = fifo; }
 
     /**
+     * @brief Sets the ROB interface for coordination
+     * @param rob Pointer to ROB
+     */
+    void setROB(ROB* rob) { m_rob = rob; }
+
+    /**
      * @brief Checks if LSQ is empty
      * @return true if no entries in LSQ
      */
-    bool isEmpty() const { return lsq_q.empty(); }
+    bool isEmpty() const { return m_lsq_q.empty(); }
 
     /**
      * @brief Gets current number of entries in LSQ
      * @return Number of entries
      */
-    uint32_t size() const { return num_entries; }
+    uint32_t size() const { return m_num_entries; }
 
     /**
      * @brief Removes the most recently added entry
      * Used for cleanup if ROB allocation fails
      */
     void removeLastEntry() {
-        if (!lsq_q.empty()) {
-            lsq_q.pop_back();
-            num_entries--;
+        if (!m_lsq_q.empty()) {
+            m_lsq_q.pop_back();
+            m_num_entries--;
         }
     }
 };
