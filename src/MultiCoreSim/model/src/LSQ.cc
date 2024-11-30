@@ -47,6 +47,7 @@ bool LSQ::allocate(const CpuFIFO::ReqMsg& request) {
     // Rationale: stores are not critical to CPU pipeline since CPU is not waiting for data
     if (request.type == CpuFIFO::REQTYPE::WRITE) {
         entry.ready = true;
+        std::cout << "[LSQ] 3.3.2: Store commits upon LSQ allocation" << std::endl;
         std::cout << "[LSQ] Store ready immediately (CPU not waiting for data)" << std::endl;
         if (m_rob) {
             m_rob->commit(request.msgId);
@@ -57,6 +58,7 @@ bool LSQ::allocate(const CpuFIFO::ReqMsg& request) {
         // Check for store-to-load forwarding
         if (ldFwd(request.addr)) {
             entry.ready = true;
+            std::cout << "[LSQ] 3.3.3: Checking store-to-load forwarding" << std::endl;
             std::cout << "[LSQ] Load ready immediately due to store forwarding" << std::endl;
             if (m_rob) {
                 m_rob->commit(request.msgId);
@@ -76,15 +78,27 @@ bool LSQ::allocate(const CpuFIFO::ReqMsg& request) {
 }
 
 bool LSQ::ldFwd(uint64_t address) {
-    std::cout << "[LSQ] Checking store forwarding for address 0x" 
+    std::cout << "[LSQ] 3.3.3: Checking store-to-load forwarding for address 0x" 
               << std::hex << address << std::dec << std::endl;
               
-    // As per 3.3.3: Check for store-to-load forwarding
+    // Must check from youngest (tail) to oldest (head)
     for (auto it = m_lsq_q.rbegin(); it != m_lsq_q.rend(); ++it) {
         if (it->request.type == CpuFIFO::REQTYPE::WRITE && 
             it->request.addr == address) {
             
-            std::cout << "[LSQ] Found matching store for forwarding" << std::endl;
+            // Must mark ALL subsequent loads to this address as ready
+            for (auto& entry : m_lsq_q) {
+                if (entry.request.type == CpuFIFO::REQTYPE::READ &&
+                    entry.request.addr == address &&
+                    !entry.ready) {
+                    entry.ready = true;
+                    if (m_rob) {
+                        m_rob->commit(entry.request.msgId);
+                        std::cout << "[LSQ] 3.3.3: Load " << entry.request.msgId 
+                                  << " committed through store forwarding" << std::endl;
+                    }
+                }
+            }
             return true;
         }
     }
@@ -96,11 +110,9 @@ void LSQ::pushToCache() {
         return;
     }
     
-    // Find oldest store ready to send to cache
     for (auto& entry : m_lsq_q) {
         if (entry.request.type == CpuFIFO::REQTYPE::WRITE && 
             entry.ready && !entry.waitingForCache) {
-            
             entry.waitingForCache = true;
             m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
             std::cout << "[LSQ] Pushed store " << entry.request.msgId 

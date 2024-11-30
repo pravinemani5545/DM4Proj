@@ -160,18 +160,13 @@ namespace ns3 {
      * - Mark ready status appropriately
      */
     void CpuCoreGenerator::ProcessTxBuf() {
-        std::cout << "\n[CPU] ========== Core " << m_coreId << " Cycle " << m_cpuCycle 
-                  << " ==========" << std::endl;
-        std::cout << "[CPU] Pipeline state:" << std::endl;
-        std::cout << "[CPU] - In-flight requests: " << m_sent_requests << "/" 
-                  << m_number_of_OoO_requests << std::endl;
-        std::cout << "[CPU] - Remaining compute: " << m_remaining_compute << std::endl;
-        std::cout << "[CPU] - Request count: " << m_cpuReqCnt << std::endl;
-        std::cout << "[CPU] - Response count: " << m_cpuRespCnt << std::endl;
+        std::cout << "[CPU] State: compute=" << m_remaining_compute 
+                  << " in-flight=" << m_sent_requests << "/" << m_number_of_OoO_requests 
+                  << std::endl;
         
         // First handle any remaining compute instructions
         if (m_remaining_compute > 0) {
-            std::cout << "[CPU] Processing compute instructions (" 
+            std::cout << "[CPU] 3.2: Processing compute instructions (" 
                       << m_remaining_compute << " remaining)" << std::endl;
                       
             while (m_remaining_compute > 0 && m_rob && m_rob->canAccept()) {
@@ -179,20 +174,17 @@ namespace ns3 {
                 compute_req.msgId = m_cpuReqCnt++;
                 compute_req.reqCoreId = m_coreId;
                 compute_req.type = CpuFIFO::REQTYPE::COMPUTE;
+                compute_req.addr = 0;  // Special value for compute
                 compute_req.cycle = m_cpuCycle;
-                compute_req.ready = true;  // Compute instructions ready immediately
-                
-                std::cout << "[CPU] Created compute request " << compute_req.msgId 
-                          << " at cycle " << m_cpuCycle << std::endl;
+                compute_req.ready = true;  // 3.3.1: Compute ready at allocation
                 
                 if (m_rob->allocate(compute_req)) {
                     m_remaining_compute--;
-                    std::cout << "[CPU] Successfully allocated compute instruction" << std::endl;
                 } else {
-                    break;  // ROB full, try again next cycle
+                    break;  // Try again next cycle if ROB full
                 }
             }
-            return;  // Process remaining compute instructions next cycle
+            return;  // Must process all compute before moving to memory
         }
         
         // Try to process memory operation if no pending compute instructions

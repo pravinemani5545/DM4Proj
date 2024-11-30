@@ -36,19 +36,6 @@ void ROB::step() {
     std::cout << "\n[ROB] ========== Step at cycle " << m_current_cycle << " ==========" << std::endl;
     std::cout << "[ROB] Current entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
     
-    // Print current ROB state
-    if (!m_rob_q.empty()) {
-        std::cout << "[ROB] Current ROB queue state:" << std::endl;
-        for (size_t i = 0; i < m_rob_q.size(); i++) {
-            const ROBEntry& entry = m_rob_q[i];
-            std::cout << "[ROB]   [" << i << "] msgId=" << entry.request.msgId 
-                      << " type=" << (int)entry.request.type
-                      << " ready=" << entry.ready 
-                      << " cycle=" << entry.allocate_cycle << std::endl;
-        }
-    }
-    
-    // As per 3.4, retire instructions every cycle
     retire();
     m_current_cycle++;
 }
@@ -80,35 +67,29 @@ bool ROB::allocate(const CpuFIFO::ReqMsg& request) {
               << " type=" << (int)request.type 
               << " ready=" << entry.ready 
               << " at cycle " << m_current_cycle << std::endl;
+    
+    std::cout << "[ROB] Instruction Flow:" << std::endl;
+    std::cout << "[ROB] - Type: " << (request.type == CpuFIFO::REQTYPE::COMPUTE ? "Compute" :
+                                     request.type == CpuFIFO::REQTYPE::READ ? "Load" : "Store") << std::endl;
+    std::cout << "[ROB] - Ready Status: " << (entry.ready ? "Ready" : "Waiting") << std::endl;
+    std::cout << "[ROB] - Queue Position: " << m_num_entries << std::endl;
+    
     return true;
 }
 
 void ROB::retire() {
     if (m_rob_q.empty()) {
-        std::cout << "[ROB] No entries to retire" << std::endl;
         return;
     }
     
-    std::cout << "[ROB] Starting retirement at cycle " << m_current_cycle << std::endl;
-    
-    // As per 3.4: Must maintain program order, so check from top of ROB queue
     uint32_t retired = 0;
-    
-    // Keep retiring until we hit IPC limit or a non-ready instruction
     while (!m_rob_q.empty() && retired < IPC) {
-        ROBEntry& head = m_rob_q.front();
-        
-        // Stop at first non-ready instruction to maintain program order
+        ROBEntry& head = m_rob_q.front();  // Get fresh reference each iteration
         if (!head.ready) {
-            std::cout << "[ROB] Head entry not ready (request " << head.request.msgId 
-                      << "), stopping retirement" << std::endl;
+            std::cout << "[ROB] Stopping - head not ready" << std::endl;
             break;
         }
         
-        std::cout << "[ROB] Retiring request " << head.request.msgId 
-                  << " type=" << (int)head.request.type << std::endl;
-        
-        // For stores, notify LSQ that store can be written to cache
         if (head.request.type == CpuFIFO::REQTYPE::WRITE && m_lsq) {
             m_lsq->commit(head.request.msgId);
         }
@@ -119,7 +100,7 @@ void ROB::retire() {
     }
     
     if (retired > 0) {
-        std::cout << "[ROB] Retired " << retired << " instructions this cycle" << std::endl;
+        std::cout << "[ROB] Retired " << retired << " instructions" << std::endl;
     }
 }
 
