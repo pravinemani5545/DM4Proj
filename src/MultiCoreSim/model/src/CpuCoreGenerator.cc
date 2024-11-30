@@ -164,7 +164,8 @@ namespace ns3 {
                       << m_remaining_compute << " remaining)" << std::endl;
                   
             // Try to allocate as many compute instructions as possible
-            while (m_remaining_compute > 0 && m_rob && m_rob->canAccept()) {
+            while (m_remaining_compute > 0 && m_rob && m_rob->canAccept() && 
+                   m_sent_requests < m_number_of_OoO_requests) {
                 // Create compute instruction request
                 CpuFIFO::ReqMsg compute_req;
                 compute_req.msgId = m_cpuReqCnt++;
@@ -178,7 +179,7 @@ namespace ns3 {
                 if (m_rob->allocate(compute_req)) {
                     m_remaining_compute--;
                     m_sent_requests++;
-                    std::cout << "[CPU] Allocated and committed compute instruction " 
+                    std::cout << "[CPU] Allocated compute instruction " 
                               << compute_req.msgId << " (ready immediately)" << std::endl;
                 } else {
                     std::cout << "[CPU] ROB full, will continue compute allocation next cycle" << std::endl;

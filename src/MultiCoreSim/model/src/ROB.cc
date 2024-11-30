@@ -59,7 +59,9 @@ void ROB::retire() {
     // As per 3.4: ROB is the only class architecturally retiring instructions
     // Must maintain program order, so check from top of ROB queue
     uint32_t retired = 0;
-    while (retired < IPC && !m_rob_q.empty()) {
+    
+    // Keep retiring until we hit IPC limit or a non-ready instruction
+    while (!m_rob_q.empty() && retired < IPC) {
         ROBEntry& head = m_rob_q.front();
         
         // Stop at first non-ready instruction to maintain program order
@@ -83,10 +85,14 @@ void ROB::retire() {
         m_rob_q.erase(m_rob_q.begin());
         m_num_entries--;
         retired++;
+        
+        std::cout << "[ROB] Successfully retired instruction " << head.request.msgId 
+                  << " (" << retired << "/" << IPC << " this cycle)" << std::endl;
     }
     
     if (retired > 0) {
-        std::cout << "[ROB] Architecturally retired " << retired << " instructions this cycle" << std::endl;
+        std::cout << "[ROB] Architecturally retired " << retired << " instructions this cycle" 
+                  << ", remaining entries: " << m_num_entries << std::endl;
     }
 }
 
