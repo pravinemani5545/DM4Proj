@@ -15,7 +15,7 @@ ROB::~ROB() {}
 
 void ROB::step() {
     // Add cycle limit check
-    if (m_current_cycle >= 60) {
+    if (m_current_cycle >= 300) {
         std::cout << "\n[ROB] ========== Final state at cycle limit (60) ==========" << std::endl;
         std::cout << "[ROB] Final ROB state:" << std::endl;
         std::cout << "[ROB] Current entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
