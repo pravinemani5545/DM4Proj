@@ -98,6 +98,13 @@ public:
     void setROB(ROB* rob) { m_rob = rob; }
     void setLSQ(LSQ* lsq) { m_lsq = lsq; }
     void setCpuFIFO(CpuFIFO* fifo) { m_cpuFIFO = fifo; }
+    
+    // Called by ROB when an instruction is retired
+    void onInstructionRetired(const CpuFIFO::ReqMsg& request) {
+        m_sent_requests--;  // Decrement in-flight count
+        std::cout << "[CPU] Instruction " << request.msgId << " retired, in-flight: " 
+                  << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
+    }
 };
 
 } // namespace ns3

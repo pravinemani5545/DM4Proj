@@ -50,6 +50,15 @@ namespace ns3 {
           m_cpuCoreSimDone(false) {
               
         std::cout << "[CPU] Initializing Core " << m_coreId << std::endl;
+        
+        // Create and connect components
+        m_rob = new ROB();
+        m_lsq = new LSQ();
+        
+        // Set up connections
+        m_lsq->setROB(m_rob);
+        m_rob->setLSQ(m_lsq);
+        m_lsq->setCpuFIFO(m_cpuFIFO);
     }
 
     CpuCoreGenerator::~CpuCoreGenerator() {
@@ -200,7 +209,6 @@ namespace ns3 {
                 // Try to allocate in ROB
                 if (m_rob->allocate(compute_req)) {
                     m_remaining_compute--;
-                    m_sent_requests++;
                     std::cout << "[CPU] Successfully allocated compute instruction " 
                               << compute_req.msgId << " (ready immediately)" << std::endl;
                     std::cout << "[CPU] Updated state:" << std::endl;
@@ -306,15 +314,13 @@ namespace ns3 {
                     if (!lsq_ok) {
                         m_rob->removeLastEntry();  // Rollback ROB allocation
                         std::cout << "[CPU] LSQ allocation failed - rolled back ROB allocation" << std::endl;
+                    } else {
+                        std::cout << "[CPU] Successfully allocated " 
+                                  << (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ ? "LOAD" : "STORE")
+                                  << " to ROB and LSQ" << std::endl;
+                        m_sent_requests++;  // Only track memory operations
+                        m_newSampleRdy = false;
                     }
-                }
-                
-                if (rob_ok && lsq_ok) {
-                    std::cout << "[CPU] Successfully allocated " 
-                              << (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ ? "LOAD" : "STORE")
-                              << " to ROB and LSQ" << std::endl;
-                    m_sent_requests++;
-                    m_newSampleRdy = false;
                 }
             }
         }
