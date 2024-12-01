@@ -176,89 +176,91 @@ namespace ns3 {
      */
     void CpuCoreGenerator::ProcessTxBuf() {
         std::cout << "\n[CPU][TX] ========== Core " << m_coreId << " Cycle " << m_cpuCycle << " ==========" << std::endl;
-        std::cout << "[CPU][TX] STATE:" << std::endl;
-        std::cout << "[CPU][TX] - Remaining compute: " << m_remaining_compute << std::endl;
-        std::cout << "[CPU][TX] - New sample ready: " << (m_newSampleRdy ? "Yes" : "No") << std::endl;
-        std::cout << "[CPU][TX] - In-flight requests: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
-        std::cout << "[CPU][TX] - Request count: " << m_cpuReqCnt << std::endl;
-        std::cout << "[CPU][TX] - Response count: " << m_cpuRespCnt << std::endl;
         
-        // Handle remaining compute instructions from current instruction group
+        if (!m_rob || !m_lsq) {
+            std::cout << "[CPU][TX] ERROR: ROB or LSQ not initialized" << std::endl;
+            return;
+        }
+
+        // First handle any pending compute instructions
         if (m_remaining_compute > 0) {
-            std::cout << "[CPU][TX] DECISION: Processing compute instructions (" << m_remaining_compute << " remaining)" << std::endl;
+            uint32_t allocated_this_cycle = 0;
+            const uint32_t max_per_cycle = 4;  // IPC value from ROB
             
-            // Try to allocate as many compute instructions as possible this cycle
-            while (m_remaining_compute > 0 && m_rob && m_rob->canAccept()) {
+            while (allocated_this_cycle < max_per_cycle && m_remaining_compute > 0 && m_rob->canAccept()) {
                 CpuFIFO::ReqMsg compute_req;
                 compute_req.msgId = m_cpuReqCnt++;
                 compute_req.reqCoreId = m_coreId;
-                compute_req.type = CpuFIFO::REQTYPE::COMPUTE;
-                compute_req.addr = 0;
+                compute_req.addr = 0;  // Special value for compute instructions
                 compute_req.cycle = m_cpuCycle;
-                compute_req.ready = true;
+                compute_req.type = CpuFIFO::REQTYPE::COMPUTE;
+                compute_req.ready = true;  // 3.3.1: Compute commits (ready) on allocation
                 
-                std::cout << "[CPU][TX] ATTEMPT: Allocating compute instruction " << compute_req.msgId << std::endl;
+                std::cout << "[CPU][TX] Allocating compute instruction " << compute_req.msgId 
+                         << " (" << allocated_this_cycle + 1 << "/" << max_per_cycle << " this cycle)" << std::endl;
                 
                 if (m_rob->allocate(compute_req)) {
                     m_remaining_compute--;
-                    std::cout << "[CPU][TX] SUCCESS: Compute instruction " << compute_req.msgId << " allocated, " << m_remaining_compute << " remaining" << std::endl;
+                    allocated_this_cycle++;
+                    std::cout << "[CPU][TX] Compute instruction allocated and committed, " 
+                             << m_remaining_compute << " remaining" << std::endl;
                 } else {
-                    std::cout << "[CPU][TX] BLOCKED: ROB allocation failed for compute instruction " << compute_req.msgId << std::endl;
+                    std::cout << "[CPU][TX] ROB full - cannot allocate more this cycle" << std::endl;
                     break;
                 }
             }
             
             if (m_remaining_compute > 0) {
-                std::cout << "[CPU][TX] EARLY RETURN: Still have " << m_remaining_compute << " compute instructions to process" << std::endl;
+                std::cout << "[CPU][TX] Still have " << m_remaining_compute 
+                         << " compute instructions - will continue next cycle" << std::endl;
                 return;  // Must finish compute instructions before memory op
             }
         }
-        
-        // Process memory operation from current instruction group
-        if (m_newSampleRdy) {
-            std::cout << "[CPU][TX] DECISION: Attempting to allocate memory request " << m_cpuMemReq.msgId << std::endl;
-            
-            if (m_rob && m_lsq && m_rob->canAccept() && m_lsq->canAccept()) {
-                bool rob_ok = m_rob->allocate(m_cpuMemReq);
-                bool lsq_ok = false;
+
+        // Then handle memory operation if one is ready
+        if (m_newSampleRdy && m_sent_requests < m_number_of_OoO_requests) {
+            // Check both ROB and LSQ can accept before allocating to either
+            if (m_rob->canAccept() && m_lsq->canAccept()) {
+                bool should_allocate = true;
                 
-                if (rob_ok) {
-                    lsq_ok = m_lsq->allocate(m_cpuMemReq);
-                    if (!lsq_ok) {
-                        m_rob->removeLastEntry();
-                        std::cout << "[CPU][TX] FAILED: LSQ allocation failed - rolled back ROB allocation" << std::endl;
-                    } else {
-                        m_sent_requests++;
-                        m_newSampleRdy = false;  // Memory op from current group processed
-                        std::cout << "[CPU][TX] SUCCESS: Memory request " << m_cpuMemReq.msgId << " allocated to ROB and LSQ" << std::endl;
+                // For loads, check store forwarding first
+                if (m_cpuMemReq.type == CpuFIFO::REQTYPE::READ) {
+                    // 3.3.3: Load commits if it hits in LSQ
+                    if (m_lsq->ldFwd(m_cpuMemReq.addr)) {
+                        m_cpuMemReq.ready = true;  // Load commits due to forwarding
                     }
-                } else {
-                    std::cout << "[CPU][TX] FAILED: ROB allocation failed for memory request " << m_cpuMemReq.msgId << std::endl;
+                } else if (m_cpuMemReq.type == CpuFIFO::REQTYPE::WRITE) {
+                    // 3.3.2: Store commits on allocation to LSQ
+                    m_cpuMemReq.ready = true;
                 }
-            } else {
-                std::cout << "[CPU][TX] BLOCKED: Cannot allocate - ROB/LSQ state: "
-                          << "ROB=" << (m_rob ? "present" : "missing") 
-                          << " LSQ=" << (m_lsq ? "present" : "missing")
-                          << " ROB_accept=" << (m_rob && m_rob->canAccept() ? "yes" : "no")
-                          << " LSQ_accept=" << (m_lsq && m_lsq->canAccept() ? "yes" : "no") << std::endl;
+                
+                // Try to allocate to both ROB and LSQ
+                if (should_allocate) {
+                    bool rob_ok = m_rob->allocate(m_cpuMemReq);
+                    if (rob_ok) {
+                        bool lsq_ok = m_lsq->allocate(m_cpuMemReq);
+                        if (!lsq_ok) {
+                            m_rob->removeLastEntry();
+                        } else {
+                            m_sent_requests++;
+                            m_newSampleRdy = false;
+                        }
+                    }
+                }
             }
             return;  // Wait for memory op to complete before next instruction group
         }
-        
-        // Read next instruction group if we've completed the current one
+
+        // Read next instruction group if current one is complete
         if (!m_newSampleRdy && !m_bmTrace.eof()) {
             std::string line;
             if (std::getline(m_bmTrace, line)) {
-                std::cout << "[CPU][TX] READ TRACE: " << line << std::endl;
-                
                 std::istringstream iss(line);
                 uint32_t compute_count;
                 std::string type;
                 uint64_t addr;
                 
                 if (iss >> std::dec >> compute_count >> addr >> type) {
-                    std::cout << "[CPU][TX] PARSED: compute=" << compute_count << " addr=0x" << std::hex << addr << std::dec << " type=" << type << std::endl;
-                    
                     // Set up next instruction group
                     m_remaining_compute = compute_count;
                     
@@ -267,21 +269,13 @@ namespace ns3 {
                         m_cpuMemReq.reqCoreId = m_coreId;
                         m_cpuMemReq.addr = addr;
                         m_cpuMemReq.cycle = m_cpuCycle;
-                        m_cpuMemReq.ready = false;
+                        m_cpuMemReq.ready = false;  // Will be set according to 3.3.1-3.3.3
                         m_cpuMemReq.type = (type == "R" ? CpuFIFO::REQTYPE::READ : CpuFIFO::REQTYPE::WRITE);
-                        
-                        std::cout << "[CPU][TX] CREATED: Memory request " << m_cpuMemReq.msgId << " (" << type << ")" << std::endl;
-                        m_newSampleRdy = true;  // Mark that we have a memory op pending
-                    }
-                    
-                    if (m_remaining_compute > 0) {
-                        std::cout << "[CPU][TX] EARLY RETURN: Found " << m_remaining_compute << " compute instructions to process first" << std::endl;
-                        return;
+                        m_newSampleRdy = true;
                     }
                 }
             } else {
                 m_cpuReqDone = true;
-                std::cout << "[CPU][TX] COMPLETE: Reached end of trace file" << std::endl;
             }
         }
     }
@@ -296,55 +290,35 @@ namespace ns3 {
      */
     void CpuCoreGenerator::ProcessRxBuf() {
         std::cout << "\n[CPU][RX] ========== Core " << m_coreId << " Cycle " << m_cpuCycle << " ==========" << std::endl;
-        std::cout << "[CPU][RX] DETAILED STATE:" << std::endl;
-        std::cout << "[CPU][RX] - In-flight requests: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
-        std::cout << "[CPU][RX] - Total requests: " << m_cpuReqCnt << std::endl;
-        std::cout << "[CPU][RX] - Total responses: " << m_cpuRespCnt << std::endl;
-        std::cout << "[CPU][RX] - FIFO State: " << (m_cpuFIFO ? "Present" : "Missing") << std::endl;
-        if (m_cpuFIFO) {
-            std::cout << "[CPU][RX] - RX FIFO Empty: " << (m_cpuFIFO->m_rxFIFO.IsEmpty() ? "Yes" : "No") << std::endl;
-        }
         
-        // Check for memory responses
+        if (!m_cpuFIFO) {
+            return;
+        }
+
+        // Process all available responses
         while (!m_cpuFIFO->m_rxFIFO.IsEmpty()) {
             m_cpuMemResp = m_cpuFIFO->m_rxFIFO.GetFrontElement();
-            std::cout << "[CPU][RX] Processing memory response:" << std::endl;
-            std::cout << "[CPU][RX] - ID: " << m_cpuMemResp.msgId << std::endl;
-            std::cout << "[CPU][RX] - Address: 0x" << std::hex << m_cpuMemResp.addr << std::dec << std::endl;
-            std::cout << "[CPU][RX] - Request Cycle: " << m_cpuMemResp.reqcycle << std::endl;
-            std::cout << "[CPU][RX] - Response Cycle: " << m_cpuMemResp.cycle << std::endl;
-            std::cout << "[CPU][RX] - Latency: " << (m_cpuMemResp.cycle - m_cpuMemResp.reqcycle) << " cycles" << std::endl;
-            
             m_cpuFIFO->m_rxFIFO.PopElement();
             
+            // Update response tracking
+            m_cpuRespCnt++;
             if (m_sent_requests > 0) {
                 m_sent_requests--;
-                m_cpuRespCnt++;
-                std::cout << "[CPU][RX] Updated counters:" << std::endl;
-                std::cout << "[CPU][RX] - In-flight: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
-                std::cout << "[CPU][RX] - Total responses: " << m_cpuRespCnt << std::endl;
             }
             
+            // Notify ROB of completion
             if (m_rob) {
-                std::cout << "[CPU][RX] Notifying ROB of completion for ID " << m_cpuMemResp.msgId << std::endl;
                 m_rob->commit(m_cpuMemResp.msgId);
             }
-            if (m_lsq) {
-                std::cout << "[CPU][RX] Notifying LSQ of completion for ID " << m_cpuMemResp.msgId << std::endl;
-                m_lsq->commit(m_cpuMemResp.msgId);
-            }
             
-            m_prevReqFinish = true;
             m_prevReqFinishCycle = m_cpuCycle;
         }
         
-        // Check simulation completion
-        if (m_cpuReqDone && m_cpuRespCnt >= m_cpuReqCnt) {
+        // Check for simulation completion
+        if (m_cpuReqDone && m_sent_requests == 0 && 
+            m_rob && m_rob->isEmpty() && 
+            m_lsq && m_lsq->isEmpty()) {
             m_cpuCoreSimDone = true;
-            std::cout << "\n[CPU][RX] ========== Simulation Complete ==========" << std::endl;
-            std::cout << "[CPU][RX] Core " << m_coreId << " finished at cycle " << m_cpuCycle << std::endl;
-            std::cout << "[CPU][RX] Total requests: " << m_cpuReqCnt << std::endl;
-            std::cout << "[CPU][RX] Total responses: " << m_cpuRespCnt << std::endl;
         }
     }
 
@@ -357,63 +331,31 @@ namespace ns3 {
      * 3. Processing TX and RX buffers
      */
 void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
-    std::cout << "\n[CPU][STEP] ==================== BEGIN CYCLE " << cpuCoreGenerator->m_cpuCycle << " ====================" << std::endl;
-    
-    // Add 30-cycle limit check
-    if (cpuCoreGenerator->m_cpuCycle >= 30) {
-        std::cout << "[CPU][STEP] Reached 30-cycle limit, ending simulation" << std::endl;
-        cpuCoreGenerator->m_cpuCoreSimDone = true;
-        return;
+    if (!cpuCoreGenerator->GetCpuSimDoneFlag()) {
+        // Update components
+        if (cpuCoreGenerator->m_rob) {
+            cpuCoreGenerator->m_rob->setCycle(cpuCoreGenerator->m_cpuCycle);
+            cpuCoreGenerator->m_rob->step();
+        }
+        
+        if (cpuCoreGenerator->m_lsq) {
+            cpuCoreGenerator->m_lsq->setCycle(cpuCoreGenerator->m_cpuCycle);
+            cpuCoreGenerator->m_lsq->step();
+        }
+        
+        // Process buffers
+        cpuCoreGenerator->ProcessRxBuf();  // Handle responses first
+        cpuCoreGenerator->ProcessTxBuf();  // Then try to send new requests
+        
+        // Increment cycle
+        cpuCoreGenerator->m_cpuCycle++;
+        
+        // Schedule next step
+        if (!cpuCoreGenerator->GetCpuSimDoneFlag()) {
+            Simulator::Schedule(Seconds(cpuCoreGenerator->GetDt()), 
+                              &CpuCoreGenerator::Step, cpuCoreGenerator);
+        }
     }
-
-    std::cout << "[CPU][STEP] SimDone=" << (cpuCoreGenerator->m_cpuCoreSimDone ? "true" : "false")
-              << " ReqDone=" << (cpuCoreGenerator->m_cpuReqDone ? "true" : "false")
-              << " ReqCount=" << cpuCoreGenerator->m_cpuReqCnt 
-              << " RespCount=" << cpuCoreGenerator->m_cpuRespCnt << std::endl;
-
-    // Update ROB cycle
-    if (cpuCoreGenerator->m_rob) {
-        std::cout << "[CPU][STEP] Updating ROB cycle to " << cpuCoreGenerator->m_cpuCycle << std::endl;
-        cpuCoreGenerator->m_rob->setCycle(cpuCoreGenerator->m_cpuCycle);
-        cpuCoreGenerator->m_rob->step();
-    }
-
-    // Update LSQ cycle
-    if (cpuCoreGenerator->m_lsq) {
-        std::cout << "[CPU][STEP] Updating LSQ cycle to " << cpuCoreGenerator->m_cpuCycle << std::endl;
-        cpuCoreGenerator->m_lsq->setCycle(cpuCoreGenerator->m_cpuCycle);
-        cpuCoreGenerator->m_lsq->step();
-    }
-
-    // Process new instructions and responses
-    std::cout << "[CPU][STEP] Starting ProcessTxBuf" << std::endl;
-    cpuCoreGenerator->ProcessTxBuf();
-    std::cout << "[CPU][STEP] Starting ProcessRxBuf" << std::endl;
-    cpuCoreGenerator->ProcessRxBuf();
-    
-    // Check simulation state before incrementing cycle
-    std::cout << "[CPU][STEP] Pre-increment state:" << std::endl;
-    std::cout << "[CPU][STEP] - Current cycle: " << cpuCoreGenerator->m_cpuCycle << std::endl;
-    std::cout << "[CPU][STEP] - Remaining compute: " << cpuCoreGenerator->m_remaining_compute << std::endl;
-    std::cout << "[CPU][STEP] - In-flight requests: " << cpuCoreGenerator->m_sent_requests << "/" 
-              << cpuCoreGenerator->m_number_of_OoO_requests << std::endl;
-    std::cout << "[CPU][STEP] - New sample ready: " << (cpuCoreGenerator->m_newSampleRdy ? "Yes" : "No") << std::endl;
-    std::cout << "[CPU][STEP] - Simulation done: " << (cpuCoreGenerator->m_cpuCoreSimDone ? "Yes" : "No") << std::endl;
-    
-    // Always increment cycle at end of step
-    cpuCoreGenerator->m_cpuCycle++;
-    std::cout << "[CPU][STEP] Incremented cycle to " << cpuCoreGenerator->m_cpuCycle << std::endl;
-    
-    // Schedule next step if not done
-    if (!cpuCoreGenerator->m_cpuCoreSimDone) {
-        std::cout << "[CPU][STEP] Scheduling next cycle" << std::endl;
-        Simulator::Schedule(NanoSeconds(cpuCoreGenerator->m_dt), &CpuCoreGenerator::Step, 
-                          Ptr<CpuCoreGenerator>(cpuCoreGenerator));
-    } else {
-        std::cout << "[CPU][STEP] Not scheduling next cycle - simulation complete" << std::endl;
-    }
-    
-    std::cout << "[CPU][STEP] ==================== END CYCLE " << cpuCoreGenerator->m_cpuCycle << " ====================" << std::endl;
 }
 
 

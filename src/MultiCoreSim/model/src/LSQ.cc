@@ -286,21 +286,42 @@ void LSQ::rxFromCache() {
 
 
 void LSQ::retire() {
-    for (auto it = m_lsq_q.begin(); it != m_lsq_q.end(); ++it) {
-        bool can_remove = false;
+    std::cout << "\n[LSQ][RETIRE] ========== Retirement Check ==========" << std::endl;
+    
+    auto it = m_lsq_q.begin();
+    while (it != m_lsq_q.end()) {
+        std::cout << "[LSQ][RETIRE] Checking entry:" << std::endl;
+        std::cout << "[LSQ][RETIRE] - ID: " << it->request.msgId << std::endl;
+        std::cout << "[LSQ][RETIRE] - Type: " << (it->request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
+        std::cout << "[LSQ][RETIRE] - Ready: " << (it->ready ? "Yes" : "No") << std::endl;
+        std::cout << "[LSQ][RETIRE] - Cache Ack: " << (it->cache_ack ? "Yes" : "No") << std::endl;
+        
+        bool should_remove = false;
         
         if (it->request.type == CpuFIFO::REQTYPE::READ) {
-            can_remove = it->ready;  // Loads retire when ready
+            // For loads: remove when ready (either forwarded or got cache response)
+            if (it->ready) {
+                should_remove = true;
+                std::cout << "[LSQ][RETIRE] Load is ready - removing" << std::endl;
+            }
         } else {
-            can_remove = it->cache_ack;  // Stores retire when acknowledged
+            // For stores: remove ONLY when cache acknowledges write completion
+            if (it->cache_ack) {
+                should_remove = true;
+                std::cout << "[LSQ][RETIRE] Store acknowledged by cache - removing" << std::endl;
+            }
         }
         
-        if (can_remove) {
+        if (should_remove) {
+            std::cout << "[LSQ][RETIRE] Removing entry " << it->request.msgId << std::endl;
             it = m_lsq_q.erase(it);
             m_num_entries--;
-            if (it == m_lsq_q.end()) break;
+        } else {
+            ++it;
         }
     }
+    
+    std::cout << "[LSQ][RETIRE] LSQ now has " << m_num_entries << " entries" << std::endl;
 }
 
 } // namespace ns3
