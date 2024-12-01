@@ -200,12 +200,14 @@ void LSQ::rxFromCache() {
             
             if (entry.request.type == CpuFIFO::REQTYPE::READ) {
                 entry.ready = true;
+                entry.waitingForCache = false;
                 std::cout << "[LSQ][RX] Load marked ready" << std::endl;
                 if (m_rob) {
                     m_rob->commit(entry.request.msgId);
                 }
             } else if (entry.request.type == CpuFIFO::REQTYPE::WRITE) {
                 entry.cache_ack = true;
+                entry.waitingForCache = false;
                 std::cout << "[LSQ][RX] Store acknowledged by cache" << std::endl;
             }
             break;
