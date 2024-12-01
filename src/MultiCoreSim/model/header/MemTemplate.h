@@ -117,6 +117,7 @@ namespace ns3
     CpuFIFO(int id, int FIFOs_depth) : CommunicationInterface(id)
     {
       m_txFIFO.SetFifoDepth(FIFOs_depth);
+      m_rxFIFO.SetFifoDepth(FIFOs_depth);
     }
 
     /**
@@ -155,13 +156,19 @@ namespace ns3
      */
     virtual bool pushMessage(Message &msg, uint64_t cycle, MessageType type = MessageType::REQUEST)
     {
-      RespMsg resp_msg;
-      resp_msg.msgId = msg.msg_id;
-      resp_msg.addr = msg.addr;
-      resp_msg.reqcycle = msg.cycle;
-      resp_msg.cycle = cycle;
-      m_rxFIFO.InsertElement(resp_msg);
-      return true;
+      // Treat as response if:
+      // 1. Type is DATA_RESPONSE, or
+      // 2. Message has a valid request cycle (indicating it's a response)
+      if (type == MessageType::DATA_RESPONSE || msg.cycle > 0) {
+        RespMsg resp_msg;
+        resp_msg.msgId = msg.msg_id;
+        resp_msg.addr = msg.addr;
+        resp_msg.reqcycle = msg.cycle;
+        resp_msg.cycle = cycle;
+        m_rxFIFO.InsertElement(resp_msg);
+        return true;
+      }
+      return false;  // Not a valid response
     }
   };
 }

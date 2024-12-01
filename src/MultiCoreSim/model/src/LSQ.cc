@@ -144,40 +144,27 @@ void LSQ::pushToCache() {
     std::cout << "\n[LSQ][PUSH] ========== Push To Cache ==========" << std::endl;
     
     if (m_lsq_q.empty() || !m_cpuFIFO || m_cpuFIFO->m_txFIFO.IsFull()) {
-        std::cout << "[LSQ][PUSH] Cannot push:" << std::endl;
-        std::cout << "[LSQ][PUSH] - Queue empty: " << (m_lsq_q.empty() ? "Yes" : "No") << std::endl;
-        std::cout << "[LSQ][PUSH] - FIFO exists: " << (m_cpuFIFO ? "Yes" : "No") << std::endl;
-        std::cout << "[LSQ][PUSH] - FIFO full: " << (m_cpuFIFO && m_cpuFIFO->m_txFIFO.IsFull() ? "Yes" : "No") << std::endl;
         return;
     }
 
-    auto& oldest = m_lsq_q.front();
-    std::cout << "[LSQ][PUSH] Checking oldest entry:" << std::endl;
-    std::cout << "[LSQ][PUSH] - ID: " << oldest.request.msgId << std::endl;
-    std::cout << "[LSQ][PUSH] - Type: " << (oldest.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
-    std::cout << "[LSQ][PUSH] - Current State:" << std::endl;
-    std::cout << "[LSQ][PUSH]   * Ready: " << (oldest.ready ? "Yes" : "No") << std::endl;
-    std::cout << "[LSQ][PUSH]   * Cache Ack: " << (oldest.cache_ack ? "Yes" : "No") << std::endl;
-    std::cout << "[LSQ][PUSH]   * Waiting: " << (oldest.waitingForCache ? "Yes" : "No") << std::endl;
+    // Check if any older entries are waiting for cache
+    for (const auto& entry : m_lsq_q) {
+        if (entry.waitingForCache) {
+            return;  // Maintain memory ordering
+        }
+        if (&entry == &m_lsq_q.front()) break;
+    }
 
+    auto& oldest = m_lsq_q.front();
     if (!oldest.waitingForCache) {
+        // For writes: send if ready (committed to ROB)
+        // For reads: send if not ready (needs memory access)
         if ((oldest.request.type == CpuFIFO::REQTYPE::WRITE && oldest.ready) ||
             (oldest.request.type == CpuFIFO::REQTYPE::READ && !oldest.ready)) {
                 
             if (!m_cpuFIFO->m_txFIFO.IsFull()) {
                 m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
                 oldest.waitingForCache = true;
-                
-                std::cout << "[LSQ][PUSH] Successfully pushed to cache:" << std::endl;
-                std::cout << "[LSQ][PUSH] - ID: " << oldest.request.msgId << std::endl;
-                std::cout << "[LSQ][PUSH] - Type: " << (oldest.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
-                std::cout << "[LSQ][PUSH] - Address: 0x" << std::hex << oldest.request.addr << std::dec << std::endl;
-                std::cout << "[LSQ][PUSH] - Updated State:" << std::endl;
-                std::cout << "[LSQ][PUSH]   * Ready: " << (oldest.ready ? "Yes" : "No") << std::endl;
-                std::cout << "[LSQ][PUSH]   * Cache Ack: " << (oldest.cache_ack ? "Yes" : "No") << std::endl;
-                std::cout << "[LSQ][PUSH]   * Waiting: " << (oldest.waitingForCache ? "Yes" : "No") << std::endl;
-            } else {
-                std::cout << "[LSQ][PUSH] Failed to push to cache - FIFO full" << std::endl;
             }
         }
     }
@@ -187,56 +174,28 @@ void LSQ::pushToCache() {
 
 
 void LSQ::rxFromCache() {
-    std::cout << "\n[LSQ][RX] ========== Receive From Cache ==========" << std::endl;
-    
     if (!m_cpuFIFO || m_cpuFIFO->m_rxFIFO.IsEmpty()) {
-        std::cout << "[LSQ][RX] No response available" << std::endl;
         return;
     }
 
     auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
     m_cpuFIFO->m_rxFIFO.PopElement();
-    
-    std::cout << "[LSQ][RX] Processing response:" << std::endl;
-    std::cout << "[LSQ][RX] - ID: " << response.msgId << std::endl;
-    std::cout << "[LSQ][RX] - Address: 0x" << std::hex << response.addr << std::dec << std::endl;
-    std::cout << "[LSQ][RX] - Request Cycle: " << response.reqcycle << std::endl;
-    std::cout << "[LSQ][RX] - Response Cycle: " << response.cycle << std::endl;
 
-    bool found = false;
+    // First pass: Handle the specific response
     for (auto& entry : m_lsq_q) {
         if (entry.request.msgId == response.msgId) {
-            found = true;
-            std::cout << "[LSQ][RX] Found matching entry:" << std::endl;
-            std::cout << "[LSQ][RX] - Type: " << (entry.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
-            std::cout << "[LSQ][RX] - Previous State:" << std::endl;
-            std::cout << "[LSQ][RX]   * Ready: " << (entry.ready ? "Yes" : "No") << std::endl;
-            std::cout << "[LSQ][RX]   * Cache Ack: " << (entry.cache_ack ? "Yes" : "No") << std::endl;
-            std::cout << "[LSQ][RX]   * Waiting: " << (entry.waitingForCache ? "Yes" : "No") << std::endl;
+            entry.waitingForCache = false;  // Clear waiting state
             
             if (entry.request.type == CpuFIFO::REQTYPE::READ) {
-                entry.ready = true;
-                entry.waitingForCache = false;
-                std::cout << "[LSQ][RX] Load marked ready" << std::endl;
+                entry.ready = true;  // Mark load as ready
                 if (m_rob) {
                     m_rob->commit(entry.request.msgId);
                 }
-            } else if (entry.request.type == CpuFIFO::REQTYPE::WRITE) {
-                entry.cache_ack = true;
-                entry.waitingForCache = false;
-                std::cout << "[LSQ][RX] Store acknowledged by cache" << std::endl;
+            } else {
+                entry.cache_ack = true;  // Mark store as acknowledged
             }
-
-            std::cout << "[LSQ][RX] - Updated State:" << std::endl;
-            std::cout << "[LSQ][RX]   * Ready: " << (entry.ready ? "Yes" : "No") << std::endl;
-            std::cout << "[LSQ][RX]   * Cache Ack: " << (entry.cache_ack ? "Yes" : "No") << std::endl;
-            std::cout << "[LSQ][RX]   * Waiting: " << (entry.waitingForCache ? "Yes" : "No") << std::endl;
             break;
         }
-    }
-
-    if (!found) {
-        std::cout << "[LSQ][RX] No matching entry found - likely already retired" << std::endl;
     }
 }
 
@@ -327,38 +286,21 @@ void LSQ::rxFromCache() {
 
 
 void LSQ::retire() {
-    std::cout << "\n[LSQ][RETIRE] ========== Retirement Check ==========" << std::endl;
-    std::cout << "[LSQ][RETIRE] Current Queue State:" << std::endl;
-    
     for (auto it = m_lsq_q.begin(); it != m_lsq_q.end(); ++it) {
-        std::cout << "[LSQ][RETIRE] Entry:" << std::endl;
-        std::cout << "[LSQ][RETIRE] - ID: " << it->request.msgId << std::endl;
-        std::cout << "[LSQ][RETIRE] - Type: " << (it->request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
-        std::cout << "[LSQ][RETIRE] - Ready: " << (it->ready ? "Yes" : "No") << std::endl;
-        std::cout << "[LSQ][RETIRE] - Cache Ack: " << (it->cache_ack ? "Yes" : "No") << std::endl;
-        
         bool can_remove = false;
+        
         if (it->request.type == CpuFIFO::REQTYPE::READ) {
-            can_remove = it->ready;
-            if (can_remove) {
-                std::cout << "[LSQ][RETIRE] Load can be removed - ready" << std::endl;
-            }
+            can_remove = it->ready;  // Loads retire when ready
         } else {
-            can_remove = it->cache_ack;
-            if (can_remove) {
-                std::cout << "[LSQ][RETIRE] Store can be removed - acknowledged" << std::endl;
-            }
+            can_remove = it->cache_ack;  // Stores retire when acknowledged
         }
         
         if (can_remove) {
-            std::cout << "[LSQ][RETIRE] Removing entry " << it->request.msgId << std::endl;
             it = m_lsq_q.erase(it);
             m_num_entries--;
             if (it == m_lsq_q.end()) break;
         }
     }
-    
-    std::cout << "[LSQ][RETIRE] Final state: " << m_num_entries << " entries" << std::endl;
 }
 
 } // namespace ns3
