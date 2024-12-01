@@ -175,17 +175,37 @@ namespace ns3 {
      * - Mark ready status appropriately
      */
     void CpuCoreGenerator::ProcessTxBuf() {
-        std::cout << "\n[CPU][TX] ========== Core " << m_coreId << " Cycle " << m_cpuCycle << " ==========" << std::endl;
-        std::cout << "[CPU][TX] Pipeline State:" << std::endl;
+        std::cout << "\n[CPU][TX] ==================== Core " << m_coreId << " Cycle " << m_cpuCycle << " ====================" << std::endl;
+        std::cout << "[CPU][TX] DETAILED STATE:" << std::endl;
         std::cout << "[CPU][TX] - In-flight requests: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
         std::cout << "[CPU][TX] - Remaining compute: " << m_remaining_compute << std::endl;
         std::cout << "[CPU][TX] - Total requests: " << m_cpuReqCnt << std::endl;
         std::cout << "[CPU][TX] - Total responses: " << m_cpuRespCnt << std::endl;
+        std::cout << "[CPU][TX] - ROB State: " << (m_rob ? "Present" : "Missing") << std::endl;
+        if (m_rob) {
+            std::cout << "[CPU][TX] - ROB Entries: " << m_rob->getNumEntries() << std::endl;
+            std::cout << "[CPU][TX] - ROB Can Accept: " << (m_rob->canAccept() ? "Yes" : "No") << std::endl;
+        }
+        std::cout << "[CPU][TX] - LSQ State: " << (m_lsq ? "Present" : "Missing") << std::endl;
+        if (m_lsq) {
+            std::cout << "[CPU][TX] - LSQ Entries: " << m_lsq->getNumEntries() << std::endl;
+            std::cout << "[CPU][TX] - LSQ Can Accept: " << (m_lsq->canAccept() ? "Yes" : "No") << std::endl;
+        }
+        std::cout << "[CPU][TX] - FIFO State: " << (m_cpuFIFO ? "Present" : "Missing") << std::endl;
+        if (m_cpuFIFO) {
+            std::cout << "[CPU][TX] - TX FIFO Full: " << (m_cpuFIFO->m_txFIFO.IsFull() ? "Yes" : "No") << std::endl;
+            std::cout << "[CPU][TX] - RX FIFO Empty: " << (m_cpuFIFO->m_rxFIFO.IsEmpty() ? "Yes" : "No") << std::endl;
+        }
         
         // First check LSQ for stores ready to commit to cache
         if (m_lsq && m_cpuFIFO && !m_cpuFIFO->m_txFIFO.IsFull()) {
             std::cout << "[CPU][TX] Checking LSQ for stores to push to cache" << std::endl;
             m_lsq->pushToCache();
+        } else {
+            std::cout << "[CPU][TX] Cannot push to cache:" << std::endl;
+            std::cout << "[CPU][TX] - LSQ present: " << (m_lsq ? "Yes" : "No") << std::endl;
+            std::cout << "[CPU][TX] - FIFO present: " << (m_cpuFIFO ? "Yes" : "No") << std::endl;
+            std::cout << "[CPU][TX] - TX FIFO full: " << (m_cpuFIFO && m_cpuFIFO->m_txFIFO.IsFull() ? "Yes" : "No") << std::endl;
         }
         
         // Handle remaining compute instructions
@@ -303,32 +323,43 @@ namespace ns3 {
      * 3. Simulation completion check
      */
     void CpuCoreGenerator::ProcessRxBuf() {
-        std::cout << "\n[CPU][RX] ========== Core " << m_coreId << " Cycle " << m_cpuCycle << " ==========" << std::endl;
+        std::cout << "\n[CPU][RX] ==================== Core " << m_coreId << " Cycle " << m_cpuCycle << " ====================" << std::endl;
+        std::cout << "[CPU][RX] DETAILED STATE:" << std::endl;
+        std::cout << "[CPU][RX] - In-flight requests: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
+        std::cout << "[CPU][RX] - Total requests: " << m_cpuReqCnt << std::endl;
+        std::cout << "[CPU][RX] - Total responses: " << m_cpuRespCnt << std::endl;
+        std::cout << "[CPU][RX] - FIFO State: " << (m_cpuFIFO ? "Present" : "Missing") << std::endl;
+        if (m_cpuFIFO) {
+            std::cout << "[CPU][RX] - RX FIFO Empty: " << (m_cpuFIFO->m_rxFIFO.IsEmpty() ? "Yes" : "No") << std::endl;
+        }
         
         // Check for memory responses
         while (!m_cpuFIFO->m_rxFIFO.IsEmpty()) {
             m_cpuMemResp = m_cpuFIFO->m_rxFIFO.GetFrontElement();
-            m_cpuFIFO->m_rxFIFO.PopElement();
-            
             std::cout << "[CPU][RX] Processing memory response:" << std::endl;
             std::cout << "[CPU][RX] - ID: " << m_cpuMemResp.msgId << std::endl;
             std::cout << "[CPU][RX] - Address: 0x" << std::hex << m_cpuMemResp.addr << std::dec << std::endl;
             std::cout << "[CPU][RX] - Request Cycle: " << m_cpuMemResp.reqcycle << std::endl;
             std::cout << "[CPU][RX] - Response Cycle: " << m_cpuMemResp.cycle << std::endl;
+            std::cout << "[CPU][RX] - Latency: " << (m_cpuMemResp.cycle - m_cpuMemResp.reqcycle) << " cycles" << std::endl;
+            
+            m_cpuFIFO->m_rxFIFO.PopElement();
             
             if (m_sent_requests > 0) {
                 m_sent_requests--;
                 m_cpuRespCnt++;
-                std::cout << "[CPU][RX] Updated in-flight requests: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
+                std::cout << "[CPU][RX] Updated counters:" << std::endl;
+                std::cout << "[CPU][RX] - In-flight: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
+                std::cout << "[CPU][RX] - Total responses: " << m_cpuRespCnt << std::endl;
             }
             
             if (m_rob) {
+                std::cout << "[CPU][RX] Notifying ROB of completion for ID " << m_cpuMemResp.msgId << std::endl;
                 m_rob->commit(m_cpuMemResp.msgId);
-                std::cout << "[CPU][RX] Notified ROB of completion" << std::endl;
             }
             if (m_lsq) {
+                std::cout << "[CPU][RX] Notifying LSQ of completion for ID " << m_cpuMemResp.msgId << std::endl;
                 m_lsq->commit(m_cpuMemResp.msgId);
-                std::cout << "[CPU][RX] Notified LSQ of completion" << std::endl;
             }
             
             m_prevReqFinish = true;

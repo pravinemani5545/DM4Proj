@@ -59,14 +59,12 @@ public:
         std::cout << "[LSQ] CPU FIFO connection established" << std::endl;
     }
     
-    void setROB(ROB* rob) { 
-        m_rob = rob;
-        std::cout << "[LSQ] ROB connection established" << std::endl;
-    }
-    
+    void setROB(ROB* rob) { m_rob = rob; }
     void setCycle(uint64_t cycle) { m_current_cycle = cycle; }
+    
     bool isEmpty() const { return m_lsq_q.empty(); }
     uint32_t size() const { return m_num_entries; }
+    uint32_t getNumEntries() const { return m_num_entries; }
     
     void removeLastEntry() {
         if (!m_lsq_q.empty()) {

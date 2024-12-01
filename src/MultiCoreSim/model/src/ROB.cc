@@ -14,25 +14,6 @@ ROB::ROB()
 ROB::~ROB() {}
 
 void ROB::step() {
-    // Add cycle limit check
-    if (m_current_cycle >= 25) {
-        std::cout << "\n[ROB] ========== Final state at cycle limit (200) ==========" << std::endl;
-        std::cout << "[ROB] Final ROB state:" << std::endl;
-        std::cout << "[ROB] Current entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
-        
-        if (!m_rob_q.empty()) {
-            std::cout << "[ROB] Final ROB queue contents:" << std::endl;
-            for (size_t i = 0; i < m_rob_q.size(); i++) {
-                const ROBEntry& entry = m_rob_q[i];
-                std::cout << "[ROB]   [" << i << "] msgId=" << entry.request.msgId 
-                          << " type=" << (int)entry.request.type
-                          << " ready=" << entry.ready 
-                          << " cycle=" << entry.allocate_cycle << std::endl;
-            }
-        }
-        return;
-    }
-
     std::cout << "\n[ROB] ========== Step at cycle " << m_current_cycle << " ==========" << std::endl;
     std::cout << "[ROB] Current entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
     

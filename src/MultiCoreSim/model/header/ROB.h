@@ -77,6 +77,9 @@ public:
                       << " Cycle: " << entry.allocate_cycle << std::endl;
         }
     }
+
+    // Added getter for detailed logging
+    uint32_t getNumEntries() const { return m_num_entries; }
 };
 
 } // namespace ns3
