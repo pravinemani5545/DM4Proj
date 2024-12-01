@@ -298,7 +298,7 @@ namespace ns3 {
      * 3. Simulation completion check
      */
     void CpuCoreGenerator::ProcessRxBuf() {
-        std::cout << "\n[CPU][RX] ==================== Core " << m_coreId << " Cycle " << m_cpuCycle << " ====================" << std::endl;
+        std::cout << "\n[CPU][RX] ========== Core " << m_coreId << " Cycle " << m_cpuCycle << " ==========" << std::endl;
         std::cout << "[CPU][RX] DETAILED STATE:" << std::endl;
         std::cout << "[CPU][RX] - In-flight requests: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
         std::cout << "[CPU][RX] - Total requests: " << m_cpuReqCnt << std::endl;
@@ -361,6 +361,14 @@ namespace ns3 {
      */
 void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
     std::cout << "\n[CPU][STEP] ==================== BEGIN CYCLE " << cpuCoreGenerator->m_cpuCycle << " ====================" << std::endl;
+    
+    // Add 30-cycle limit check
+    if (cpuCoreGenerator->m_cpuCycle >= 30) {
+        std::cout << "[CPU][STEP] Reached 30-cycle limit, ending simulation" << std::endl;
+        cpuCoreGenerator->m_cpuCoreSimDone = true;
+        return;
+    }
+
     std::cout << "[CPU][STEP] SimDone=" << (cpuCoreGenerator->m_cpuCoreSimDone ? "true" : "false")
               << " ReqDone=" << (cpuCoreGenerator->m_cpuReqDone ? "true" : "false")
               << " ReqCount=" << cpuCoreGenerator->m_cpuReqCnt 
@@ -408,7 +416,7 @@ void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
         std::cout << "[CPU][STEP] Not scheduling next cycle - simulation complete" << std::endl;
     }
     
-    std::cout << "[CPU][STEP] ==================== END CYCLE " << (cpuCoreGenerator->m_cpuCycle - 1) << " ====================" << std::endl;
+    std::cout << "[CPU][STEP] ==================== END CYCLE " << cpuCoreGenerator->m_cpuCycle << " ====================" << std::endl;
 }
 
 
