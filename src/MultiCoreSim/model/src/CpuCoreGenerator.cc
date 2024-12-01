@@ -176,6 +176,12 @@ namespace ns3 {
      */
     void CpuCoreGenerator::ProcessTxBuf() {
         std::cout << "\n[CPU][TX] ========== Core " << m_coreId << " Cycle " << m_cpuCycle << " ==========" << std::endl;
+        std::cout << "[CPU][TX] STATE:" << std::endl;
+        std::cout << "[CPU][TX] - Remaining compute: " << m_remaining_compute << std::endl;
+        std::cout << "[CPU][TX] - New sample ready: " << (m_newSampleRdy ? "Yes" : "No") << std::endl;
+        std::cout << "[CPU][TX] - In-flight requests: " << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
+        std::cout << "[CPU][TX] - Request count: " << m_cpuReqCnt << std::endl;
+        std::cout << "[CPU][TX] - Response count: " << m_cpuRespCnt << std::endl;
         
         // Handle remaining compute instructions
         if (m_remaining_compute > 0) {
@@ -225,6 +231,12 @@ namespace ns3 {
                     if (iss >> std::dec >> compute_count >> addr >> type) {
                         m_remaining_compute = compute_count;
                         std::cout << "[CPU][TX] PARSED: compute=" << compute_count << " addr=0x" << std::hex << addr << std::dec << " type=" << type << std::endl;
+                        
+                        // If we have compute instructions, return to process them first
+                        if (m_remaining_compute > 0) {
+                            std::cout << "[CPU][TX] EARLY RETURN: Found " << m_remaining_compute << " compute instructions to process next cycle" << std::endl;
+                            return;
+                        }
                         
                         if (type == "R" || type == "W") {
                             m_cpuMemReq.msgId = m_cpuReqCnt++;
@@ -348,29 +360,55 @@ namespace ns3 {
      * 3. Processing TX and RX buffers
      */
 void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
-    std::cout << "\n[CPU] ========== Cycle " << cpuCoreGenerator->m_cpuCycle << " ==========" << std::endl;
+    std::cout << "\n[CPU][STEP] ==================== BEGIN CYCLE " << cpuCoreGenerator->m_cpuCycle << " ====================" << std::endl;
+    std::cout << "[CPU][STEP] SimDone=" << (cpuCoreGenerator->m_cpuCoreSimDone ? "true" : "false")
+              << " ReqDone=" << (cpuCoreGenerator->m_cpuReqDone ? "true" : "false")
+              << " ReqCount=" << cpuCoreGenerator->m_cpuReqCnt 
+              << " RespCount=" << cpuCoreGenerator->m_cpuRespCnt << std::endl;
 
     // Update ROB cycle
     if (cpuCoreGenerator->m_rob) {
+        std::cout << "[CPU][STEP] Updating ROB cycle to " << cpuCoreGenerator->m_cpuCycle << std::endl;
         cpuCoreGenerator->m_rob->setCycle(cpuCoreGenerator->m_cpuCycle);
         cpuCoreGenerator->m_rob->step();
     }
 
     // Update LSQ cycle
     if (cpuCoreGenerator->m_lsq) {
+        std::cout << "[CPU][STEP] Updating LSQ cycle to " << cpuCoreGenerator->m_cpuCycle << std::endl;
         cpuCoreGenerator->m_lsq->setCycle(cpuCoreGenerator->m_cpuCycle);
-        cpuCoreGenerator->m_lsq->step();  // rxFromCache is handled in LSQ::step()
-
-        // Try to send stores to cache
-        if (cpuCoreGenerator->m_cpuFIFO && !cpuCoreGenerator->m_cpuFIFO->m_txFIFO.IsFull()) {
-            cpuCoreGenerator->m_lsq->pushToCache();
-        }
+        cpuCoreGenerator->m_lsq->step();
     }
 
-    // Process new instructions
+    // Process new instructions and responses
+    std::cout << "[CPU][STEP] Starting ProcessTxBuf" << std::endl;
     cpuCoreGenerator->ProcessTxBuf();
+    std::cout << "[CPU][STEP] Starting ProcessRxBuf" << std::endl;
     cpuCoreGenerator->ProcessRxBuf();
+    
+    // Check simulation state before incrementing cycle
+    std::cout << "[CPU][STEP] Pre-increment state:" << std::endl;
+    std::cout << "[CPU][STEP] - Current cycle: " << cpuCoreGenerator->m_cpuCycle << std::endl;
+    std::cout << "[CPU][STEP] - Remaining compute: " << cpuCoreGenerator->m_remaining_compute << std::endl;
+    std::cout << "[CPU][STEP] - In-flight requests: " << cpuCoreGenerator->m_sent_requests << "/" 
+              << cpuCoreGenerator->m_number_of_OoO_requests << std::endl;
+    std::cout << "[CPU][STEP] - New sample ready: " << (cpuCoreGenerator->m_newSampleRdy ? "Yes" : "No") << std::endl;
+    std::cout << "[CPU][STEP] - Simulation done: " << (cpuCoreGenerator->m_cpuCoreSimDone ? "Yes" : "No") << std::endl;
+    
+    // Always increment cycle at end of step
     cpuCoreGenerator->m_cpuCycle++;
+    std::cout << "[CPU][STEP] Incremented cycle to " << cpuCoreGenerator->m_cpuCycle << std::endl;
+    
+    // Schedule next step if not done
+    if (!cpuCoreGenerator->m_cpuCoreSimDone) {
+        std::cout << "[CPU][STEP] Scheduling next cycle" << std::endl;
+        Simulator::Schedule(NanoSeconds(cpuCoreGenerator->m_dt), &CpuCoreGenerator::Step, 
+                          Ptr<CpuCoreGenerator>(cpuCoreGenerator));
+    } else {
+        std::cout << "[CPU][STEP] Not scheduling next cycle - simulation complete" << std::endl;
+    }
+    
+    std::cout << "[CPU][STEP] ==================== END CYCLE " << (cpuCoreGenerator->m_cpuCycle - 1) << " ====================" << std::endl;
 }
 
 
