@@ -183,7 +183,7 @@ namespace ns3 {
         std::cout << "[CPU][TX] - Request count: " << m_cpuReqCnt << std::endl;
         std::cout << "[CPU][TX] - Response count: " << m_cpuRespCnt << std::endl;
         
-        // Handle remaining compute instructions
+        // Handle remaining compute instructions from current instruction group
         if (m_remaining_compute > 0) {
             std::cout << "[CPU][TX] DECISION: Processing compute instructions (" << m_remaining_compute << " remaining)" << std::endl;
             
@@ -210,82 +210,79 @@ namespace ns3 {
             
             if (m_remaining_compute > 0) {
                 std::cout << "[CPU][TX] EARLY RETURN: Still have " << m_remaining_compute << " compute instructions to process" << std::endl;
-                return;
+                return;  // Must finish compute instructions before memory op
             }
         }
         
-        // Process memory operations
-        if (m_sent_requests < m_number_of_OoO_requests) {
-            std::cout << "[CPU][TX] DECISION: Can process memory operations (" << m_sent_requests << "/" << m_number_of_OoO_requests << " in flight)" << std::endl;
+        // Process memory operation from current instruction group
+        if (m_newSampleRdy) {
+            std::cout << "[CPU][TX] DECISION: Attempting to allocate memory request " << m_cpuMemReq.msgId << std::endl;
             
-            if (!m_newSampleRdy && !m_bmTrace.eof()) {
-                std::string line;
-                if (std::getline(m_bmTrace, line)) {
-                    std::cout << "[CPU][TX] READ TRACE: " << line << std::endl;
-                    
-                    std::istringstream iss(line);
-                    uint32_t compute_count;
-                    std::string type;
-                    uint64_t addr;
-                    
-                    if (iss >> std::dec >> compute_count >> addr >> type) {
-                        m_remaining_compute = compute_count;
-                        std::cout << "[CPU][TX] PARSED: compute=" << compute_count << " addr=0x" << std::hex << addr << std::dec << " type=" << type << std::endl;
-                        
-                        // If we have compute instructions, return to process them first
-                        if (m_remaining_compute > 0) {
-                            std::cout << "[CPU][TX] EARLY RETURN: Found " << m_remaining_compute << " compute instructions to process next cycle" << std::endl;
-                            return;
-                        }
-                        
-                        if (type == "R" || type == "W") {
-                            m_cpuMemReq.msgId = m_cpuReqCnt++;
-                            m_cpuMemReq.reqCoreId = m_coreId;
-                            m_cpuMemReq.addr = addr;
-                            m_cpuMemReq.cycle = m_cpuCycle;
-                            m_cpuMemReq.ready = false;
-                            m_cpuMemReq.type = (type == "R" ? CpuFIFO::REQTYPE::READ : CpuFIFO::REQTYPE::WRITE);
-                            
-                            std::cout << "[CPU][TX] CREATED: Memory request " << m_cpuMemReq.msgId << " (" << type << ")" << std::endl;
-                            m_newSampleRdy = true;
-                        }
-                    }
-                } else {
-                    m_cpuReqDone = true;
-                    std::cout << "[CPU][TX] COMPLETE: Reached end of trace file" << std::endl;
-                }
-            }
-            
-            if (m_newSampleRdy) {
-                std::cout << "[CPU][TX] DECISION: Attempting to allocate memory request " << m_cpuMemReq.msgId << std::endl;
+            if (m_rob && m_lsq && m_rob->canAccept() && m_lsq->canAccept()) {
+                bool rob_ok = m_rob->allocate(m_cpuMemReq);
+                bool lsq_ok = false;
                 
-                if (m_rob && m_lsq && m_rob->canAccept() && m_lsq->canAccept()) {
-                    bool rob_ok = m_rob->allocate(m_cpuMemReq);
-                    bool lsq_ok = false;
-                    
-                    if (rob_ok) {
-                        lsq_ok = m_lsq->allocate(m_cpuMemReq);
-                        if (!lsq_ok) {
-                            m_rob->removeLastEntry();
-                            std::cout << "[CPU][TX] FAILED: LSQ allocation failed - rolled back ROB allocation" << std::endl;
-                        } else {
-                            m_sent_requests++;
-                            m_newSampleRdy = false;
-                            std::cout << "[CPU][TX] SUCCESS: Memory request " << m_cpuMemReq.msgId << " allocated to ROB and LSQ" << std::endl;
-                        }
+                if (rob_ok) {
+                    lsq_ok = m_lsq->allocate(m_cpuMemReq);
+                    if (!lsq_ok) {
+                        m_rob->removeLastEntry();
+                        std::cout << "[CPU][TX] FAILED: LSQ allocation failed - rolled back ROB allocation" << std::endl;
                     } else {
-                        std::cout << "[CPU][TX] FAILED: ROB allocation failed for memory request " << m_cpuMemReq.msgId << std::endl;
+                        m_sent_requests++;
+                        m_newSampleRdy = false;  // Memory op from current group processed
+                        std::cout << "[CPU][TX] SUCCESS: Memory request " << m_cpuMemReq.msgId << " allocated to ROB and LSQ" << std::endl;
                     }
                 } else {
-                    std::cout << "[CPU][TX] BLOCKED: Cannot allocate - ROB/LSQ state: "
-                              << "ROB=" << (m_rob ? "present" : "missing") 
-                              << " LSQ=" << (m_lsq ? "present" : "missing")
-                              << " ROB_accept=" << (m_rob && m_rob->canAccept() ? "yes" : "no")
-                              << " LSQ_accept=" << (m_lsq && m_lsq->canAccept() ? "yes" : "no") << std::endl;
+                    std::cout << "[CPU][TX] FAILED: ROB allocation failed for memory request " << m_cpuMemReq.msgId << std::endl;
                 }
+            } else {
+                std::cout << "[CPU][TX] BLOCKED: Cannot allocate - ROB/LSQ state: "
+                          << "ROB=" << (m_rob ? "present" : "missing") 
+                          << " LSQ=" << (m_lsq ? "present" : "missing")
+                          << " ROB_accept=" << (m_rob && m_rob->canAccept() ? "yes" : "no")
+                          << " LSQ_accept=" << (m_lsq && m_lsq->canAccept() ? "yes" : "no") << std::endl;
             }
-        } else {
-            std::cout << "[CPU][TX] BLOCKED: Maximum in-flight requests reached (" << m_sent_requests << "/" << m_number_of_OoO_requests << ")" << std::endl;
+            return;  // Wait for memory op to complete before next instruction group
+        }
+        
+        // Read next instruction group if we've completed the current one
+        if (!m_newSampleRdy && !m_bmTrace.eof()) {
+            std::string line;
+            if (std::getline(m_bmTrace, line)) {
+                std::cout << "[CPU][TX] READ TRACE: " << line << std::endl;
+                
+                std::istringstream iss(line);
+                uint32_t compute_count;
+                std::string type;
+                uint64_t addr;
+                
+                if (iss >> std::dec >> compute_count >> addr >> type) {
+                    std::cout << "[CPU][TX] PARSED: compute=" << compute_count << " addr=0x" << std::hex << addr << std::dec << " type=" << type << std::endl;
+                    
+                    // Set up next instruction group
+                    m_remaining_compute = compute_count;
+                    
+                    if (type == "R" || type == "W") {
+                        m_cpuMemReq.msgId = m_cpuReqCnt++;
+                        m_cpuMemReq.reqCoreId = m_coreId;
+                        m_cpuMemReq.addr = addr;
+                        m_cpuMemReq.cycle = m_cpuCycle;
+                        m_cpuMemReq.ready = false;
+                        m_cpuMemReq.type = (type == "R" ? CpuFIFO::REQTYPE::READ : CpuFIFO::REQTYPE::WRITE);
+                        
+                        std::cout << "[CPU][TX] CREATED: Memory request " << m_cpuMemReq.msgId << " (" << type << ")" << std::endl;
+                        m_newSampleRdy = true;  // Mark that we have a memory op pending
+                    }
+                    
+                    if (m_remaining_compute > 0) {
+                        std::cout << "[CPU][TX] EARLY RETURN: Found " << m_remaining_compute << " compute instructions to process first" << std::endl;
+                        return;
+                    }
+                }
+            } else {
+                m_cpuReqDone = true;
+                std::cout << "[CPU][TX] COMPLETE: Reached end of trace file" << std::endl;
+            }
         }
     }
 
