@@ -143,13 +143,16 @@ void LSQ::rxFromCache() {
     // Find matching request in LSQ
     for (auto& entry : m_lsq_q) {
         if (entry.request.msgId == response.msgId) {
+            std::cout << "[LSQ] Found matching request in LSQ for msgId=" << response.msgId << std::endl;
             if (entry.request.type == CpuFIFO::REQTYPE::READ) {
                 entry.ready = true;
+                std::cout << "[LSQ] Marking load request " << response.msgId << " as ready" << std::endl;
                 if (m_rob) {
                     m_rob->commit(entry.request.msgId);
                 }
             } else {
                 entry.cache_ack = true;
+                std::cout << "[LSQ] Marking store request " << response.msgId << " as acknowledged" << std::endl;
             }
             break;
         }

@@ -282,7 +282,7 @@ namespace ns3 {
      * 3. Processing TX and RX buffers
      */
     void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
-        if (cpuCoreGenerator->m_cpuCycle >= 200) {
+        if (cpuCoreGenerator->m_cpuCycle >= 25) {
             cpuCoreGenerator->m_cpuCoreSimDone = true;
             std::cout << "\n[CPU] ========== Reached cycle limit (200) ==========" << std::endl;
             Logger::getLogger()->traceEnd(cpuCoreGenerator->m_coreId);
