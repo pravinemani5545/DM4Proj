@@ -155,20 +155,30 @@ void LSQ::pushToCache() {
     std::cout << "[LSQ][PUSH] Checking oldest entry:" << std::endl;
     std::cout << "[LSQ][PUSH] - ID: " << oldest.request.msgId << std::endl;
     std::cout << "[LSQ][PUSH] - Type: " << (oldest.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
-    std::cout << "[LSQ][PUSH] - Ready: " << (oldest.ready ? "Yes" : "No") << std::endl;
-    std::cout << "[LSQ][PUSH] - Waiting: " << (oldest.waitingForCache ? "Yes" : "No") << std::endl;
+    std::cout << "[LSQ][PUSH] - Current State:" << std::endl;
+    std::cout << "[LSQ][PUSH]   * Ready: " << (oldest.ready ? "Yes" : "No") << std::endl;
+    std::cout << "[LSQ][PUSH]   * Cache Ack: " << (oldest.cache_ack ? "Yes" : "No") << std::endl;
+    std::cout << "[LSQ][PUSH]   * Waiting: " << (oldest.waitingForCache ? "Yes" : "No") << std::endl;
 
     if (!oldest.waitingForCache) {
         if ((oldest.request.type == CpuFIFO::REQTYPE::WRITE && oldest.ready) ||
             (oldest.request.type == CpuFIFO::REQTYPE::READ && !oldest.ready)) {
-            
-            oldest.waitingForCache = true;
-            m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
-            
-            std::cout << "[LSQ][PUSH] Successfully pushed to cache:" << std::endl;
-            std::cout << "[LSQ][PUSH] - ID: " << oldest.request.msgId << std::endl;
-            std::cout << "[LSQ][PUSH] - Type: " << (oldest.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
-            std::cout << "[LSQ][PUSH] - Address: 0x" << std::hex << oldest.request.addr << std::dec << std::endl;
+                
+            if (!m_cpuFIFO->m_txFIFO.IsFull()) {
+                m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
+                oldest.waitingForCache = true;
+                
+                std::cout << "[LSQ][PUSH] Successfully pushed to cache:" << std::endl;
+                std::cout << "[LSQ][PUSH] - ID: " << oldest.request.msgId << std::endl;
+                std::cout << "[LSQ][PUSH] - Type: " << (oldest.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
+                std::cout << "[LSQ][PUSH] - Address: 0x" << std::hex << oldest.request.addr << std::dec << std::endl;
+                std::cout << "[LSQ][PUSH] - Updated State:" << std::endl;
+                std::cout << "[LSQ][PUSH]   * Ready: " << (oldest.ready ? "Yes" : "No") << std::endl;
+                std::cout << "[LSQ][PUSH]   * Cache Ack: " << (oldest.cache_ack ? "Yes" : "No") << std::endl;
+                std::cout << "[LSQ][PUSH]   * Waiting: " << (oldest.waitingForCache ? "Yes" : "No") << std::endl;
+            } else {
+                std::cout << "[LSQ][PUSH] Failed to push to cache - FIFO full" << std::endl;
+            }
         }
     }
 }
@@ -193,10 +203,16 @@ void LSQ::rxFromCache() {
     std::cout << "[LSQ][RX] - Request Cycle: " << response.reqcycle << std::endl;
     std::cout << "[LSQ][RX] - Response Cycle: " << response.cycle << std::endl;
 
+    bool found = false;
     for (auto& entry : m_lsq_q) {
         if (entry.request.msgId == response.msgId) {
+            found = true;
             std::cout << "[LSQ][RX] Found matching entry:" << std::endl;
             std::cout << "[LSQ][RX] - Type: " << (entry.request.type == CpuFIFO::REQTYPE::READ ? "READ" : "WRITE") << std::endl;
+            std::cout << "[LSQ][RX] - Previous State:" << std::endl;
+            std::cout << "[LSQ][RX]   * Ready: " << (entry.ready ? "Yes" : "No") << std::endl;
+            std::cout << "[LSQ][RX]   * Cache Ack: " << (entry.cache_ack ? "Yes" : "No") << std::endl;
+            std::cout << "[LSQ][RX]   * Waiting: " << (entry.waitingForCache ? "Yes" : "No") << std::endl;
             
             if (entry.request.type == CpuFIFO::REQTYPE::READ) {
                 entry.ready = true;
@@ -210,8 +226,17 @@ void LSQ::rxFromCache() {
                 entry.waitingForCache = false;
                 std::cout << "[LSQ][RX] Store acknowledged by cache" << std::endl;
             }
+
+            std::cout << "[LSQ][RX] - Updated State:" << std::endl;
+            std::cout << "[LSQ][RX]   * Ready: " << (entry.ready ? "Yes" : "No") << std::endl;
+            std::cout << "[LSQ][RX]   * Cache Ack: " << (entry.cache_ack ? "Yes" : "No") << std::endl;
+            std::cout << "[LSQ][RX]   * Waiting: " << (entry.waitingForCache ? "Yes" : "No") << std::endl;
             break;
         }
+    }
+
+    if (!found) {
+        std::cout << "[LSQ][RX] No matching entry found - likely already retired" << std::endl;
     }
 }
 
