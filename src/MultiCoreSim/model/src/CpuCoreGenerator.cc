@@ -277,12 +277,10 @@ namespace ns3 {
                 std::cout << "[CPU] Reached end of trace file" << std::endl;
                 // // Halt for debugging purposes
                 if (m_cpuCycle > 50) {
+                    std::cout << "Halting..." << std::endl;
                     int x = 0;
                     while(true) {
-                        while(x < 1000) {
-                            x++;
-                        }
-                        std::cout << "Halting..." << std::endl;
+                        x = 1 + 1;
                     }
                 }
             }
