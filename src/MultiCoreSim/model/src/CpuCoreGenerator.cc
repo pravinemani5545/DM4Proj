@@ -275,6 +275,16 @@ namespace ns3 {
             else {
                 m_cpuReqDone = true;
                 std::cout << "[CPU] Reached end of trace file" << std::endl;
+                // // Halt for debugging purposes
+                if (m_cpuCycle > 50) {
+                    int x = 0;
+                    while(true) {
+                        while(x < 1000) {
+                            x++;
+                        }
+                        std::cout << "Halting..." << std::endl;
+                    }
+                }
             }
         }
         
@@ -384,16 +394,11 @@ namespace ns3 {
         if (cpuCoreGenerator->m_lsq) {
             cpuCoreGenerator->m_lsq->setCycle(cpuCoreGenerator->m_cpuCycle);
             cpuCoreGenerator->m_lsq->step();
-            
-            // First handle any cache responses
-            if (cpuCoreGenerator->m_cpuFIFO && !cpuCoreGenerator->m_cpuFIFO->m_rxFIFO.IsEmpty()) {
-                cpuCoreGenerator->m_lsq->rxFromCache();
+
+            if (cpuCoreGenerator->m_lsq->isEmpty()) {
+                cpuCoreGenerator->m_sent_requests = 0;
             }
             
-            // Then try to send stores to cache
-            if (cpuCoreGenerator->m_cpuFIFO && !cpuCoreGenerator->m_cpuFIFO->m_txFIFO.IsFull()) {
-                cpuCoreGenerator->m_lsq->pushToCache();
-            }
         }
         
         // Process new instructions

@@ -146,6 +146,7 @@ void LSQ::pushToCache() {
 }
 
 void LSQ::rxFromCache() {
+    std::cout << "Rx From Cache, isEmpty=" << m_cpuFIFO->m_rxFIFO.IsEmpty() << std::endl;
     if (!m_cpuFIFO || m_cpuFIFO->m_rxFIFO.IsEmpty()) return;
     
     auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
@@ -185,6 +186,8 @@ void LSQ::retire() {
     auto it = m_lsq_q.begin();
     while (it != m_lsq_q.end()) {
         bool can_remove = false;
+        std::cout << "Request Type: " << it->request.type << std::endl;
+        std::cout << "Ready: " << it->ready << std::endl;
         
         if (it->request.type == CpuFIFO::REQTYPE::READ) {
             // For loads: remove when ready (either from cache or forwarding)
@@ -197,6 +200,8 @@ void LSQ::retire() {
         } else {
             // For stores: remove only after cache acknowledges write completion
             can_remove = it->cache_ack;
+            // can_remove = true;
+            std::cout << "Cache Ack: " << it->cache_ack << std::endl;
             if (can_remove) {
                 std::cout << "[LSQ] Removing completed store " << it->request.msgId 
                           << " (addr=0x" << std::hex << it->request.addr 
@@ -217,17 +222,20 @@ void LSQ::commit(uint64_t requestId) {
     std::cout << "[LSQ] Processing commit for request " << requestId << std::endl;
     
     for (auto& entry : m_lsq_q) {
+        std::cout << "[LSQ] ID: " << entry.request.msgId << std::endl;
         if (entry.request.msgId == requestId) {
             if (entry.request.type == CpuFIFO::REQTYPE::WRITE) {
-                if (entry.cache_ack) {
+                entry.cache_ack = true;
+                
+                // if (entry.cache_ack) {
                     // Store has been written to cache, can be removed
                     std::cout << "[LSQ] Store " << requestId 
                               << " committed and written to cache" << std::endl;
-                } else {
-                    // Need to write store to cache
-                    std::cout << "[LSQ] Store " << requestId 
-                              << " committed but waiting for cache write" << std::endl;
-                }
+                // } else {
+                //     // Need to write store to cache
+                //     std::cout << "[LSQ] Store " << requestId 
+                //               << " committed but waiting for cache write" << std::endl;
+                // }
             }
             return;
         }
