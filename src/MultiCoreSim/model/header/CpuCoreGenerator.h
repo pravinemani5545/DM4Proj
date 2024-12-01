@@ -100,11 +100,7 @@ public:
     void setCpuFIFO(CpuFIFO* fifo) { m_cpuFIFO = fifo; }
     
     // Called by ROB when an instruction is retired
-    void onInstructionRetired(const CpuFIFO::ReqMsg& request) {
-        m_sent_requests--;  // Decrement in-flight count
-        std::cout << "[CPU] Instruction " << request.msgId << " retired, in-flight: " 
-                  << m_sent_requests << "/" << m_number_of_OoO_requests << std::endl;
-    }
+    void onInstructionRetired(const CpuFIFO::ReqMsg& request);
 };
 
 } // namespace ns3
