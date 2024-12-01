@@ -248,7 +248,11 @@ namespace ns3 {
      * 3. Simulation completion check
      */
     void CpuCoreGenerator::ProcessRxBuf() {
+        std::cout << "[CPU] ProcessRxBuf - FIFO empty=" 
+                  << m_cpuFIFO->m_rxFIFO.IsEmpty() << std::endl;
+                  
         if (!m_cpuFIFO->m_rxFIFO.IsEmpty()) {
+            std::cout << "[CPU] Found response in rxFIFO" << std::endl;
             m_cpuMemResp = m_cpuFIFO->m_rxFIFO.GetFrontElement();
             m_cpuFIFO->m_rxFIFO.PopElement();
             m_sent_requests--;

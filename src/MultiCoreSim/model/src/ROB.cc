@@ -78,13 +78,32 @@ bool ROB::allocate(const CpuFIFO::ReqMsg& request) {
 }
 
 void ROB::retire() {
+    std::cout << "[ROB] Retire check - Queue contents:" << std::endl;
+    for (size_t i = 0; i < m_rob_q.size(); i++) {
+        const ROBEntry& entry = m_rob_q[i];
+        std::cout << "[ROB] Position " << i 
+                  << " msgId=" << entry.request.msgId
+                  << " type=" << (int)entry.request.type
+                  << " ready=" << entry.ready
+                  << " cycle=" << entry.allocate_cycle << std::endl;
+    }
+    
     if (m_rob_q.empty()) {
+        std::cout << "[ROB] Cannot retire - queue empty" << std::endl;
         return;
     }
     
     uint32_t retired = 0;
     while (!m_rob_q.empty() && retired < IPC) {
-        ROBEntry& head = m_rob_q.front();  // Get fresh reference each iteration
+        // Debug print both conditions
+        std::cout << "[ROB] Retire conditions: !empty=" << (!m_rob_q.empty()) 
+                  << " retired<IPC=" << (retired < IPC) 
+                  << " head.ready=" << m_rob_q.front().ready
+                  << " head.type=" << (int)m_rob_q.front().request.type
+                  << " head.msgId=" << m_rob_q.front().request.msgId
+                  << std::endl;
+                  
+        ROBEntry& head = m_rob_q.front();
         if (!head.ready) {
             std::cout << "[ROB] Stopping - head not ready" << std::endl;
             break;

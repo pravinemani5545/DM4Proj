@@ -107,6 +107,17 @@ bool LSQ::ldFwd(uint64_t address) {
 }
 
 void LSQ::pushToCache() {
+    std::cout << "[LSQ] pushToCache check - FIFO exists=" << (m_cpuFIFO != nullptr)
+              << " isFull=" << (m_cpuFIFO ? m_cpuFIFO->m_txFIFO.IsFull() : true) << std::endl;
+              
+    for (auto& entry : m_lsq_q) {
+        std::cout << "[LSQ] Entry " << entry.request.msgId 
+                  << " type=" << (entry.request.type == CpuFIFO::REQTYPE::READ ? "LOAD" : "STORE")
+                  << " ready=" << entry.ready
+                  << " waitingForCache=" << entry.waitingForCache
+                  << " addr=0x" << std::hex << entry.request.addr << std::dec << std::endl;
+    }
+    
     if (m_lsq_q.empty() || !m_cpuFIFO || m_cpuFIFO->m_txFIFO.IsFull()) {
         return;
     }
@@ -132,13 +143,15 @@ void LSQ::pushToCache() {
 }
 
 void LSQ::rxFromCache() {
+    std::cout << "[LSQ] rxFromCache check - FIFO exists=" << (m_cpuFIFO != nullptr) 
+              << " isEmpty=" << (m_cpuFIFO ? m_cpuFIFO->m_rxFIFO.IsEmpty() : true) << std::endl;
+              
     if (!m_cpuFIFO || m_cpuFIFO->m_rxFIFO.IsEmpty()) return;
     
     auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
-    m_cpuFIFO->m_rxFIFO.PopElement();
-    
-    std::cout << "[LSQ] Received cache response for request " << response.msgId 
-              << " (addr=0x" << std::hex << response.addr << std::dec << ")" << std::endl;
+    std::cout << "[LSQ] Processing cache response msgId=" << response.msgId 
+              << " addr=0x" << std::hex << response.addr << std::dec 
+              << " type=" << (int)response.type << std::endl;
     
     // Find matching request in LSQ
     for (auto& entry : m_lsq_q) {
@@ -165,24 +178,29 @@ void LSQ::rxFromCache() {
 }
 
 void LSQ::retire() {
+    std::cout << "[LSQ] Attempting to retire entries..." << std::endl;
     auto it = m_lsq_q.begin();
     while (it != m_lsq_q.end()) {
-        bool can_remove = false;
+        std::cout << "[LSQ] Checking entry " << it->request.msgId 
+                  << " type=" << (it->request.type == CpuFIFO::REQTYPE::READ ? "LOAD" : "STORE")
+                  << " ready=" << it->ready 
+                  << " cache_ack=" << it->cache_ack
+                  << " waitingForCache=" << it->waitingForCache << std::endl;
         
-        // As per 3.4.1: Different removal conditions for loads vs stores
+        bool can_remove = false;
         if (it->request.type == CpuFIFO::REQTYPE::READ) {
-            can_remove = it->ready;  // Remove loads when ready
+            can_remove = it->ready;
         } else {
-            can_remove = it->cache_ack;  // Remove stores after cache ack
+            can_remove = it->cache_ack;
         }
         
         if (can_remove) {
-            std::cout << "[LSQ] Removing " 
-                      << (it->request.type == CpuFIFO::REQTYPE::READ ? "load " : "store ")
-                      << it->request.msgId << std::endl;
+            std::cout << "[LSQ] Removing entry " << it->request.msgId << std::endl;
             it = m_lsq_q.erase(it);
             m_num_entries--;
         } else {
+            std::cout << "[LSQ] Cannot remove entry " << it->request.msgId 
+                      << " - conditions not met" << std::endl;
             ++it;
         }
     }
