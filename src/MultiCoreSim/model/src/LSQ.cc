@@ -111,19 +111,19 @@ void LSQ::pushToCache() {
         return;
     }
     
-    // Always check oldest entry first (front of queue)
+    // Always check oldest entry first
     auto& oldest = m_lsq_q.front();
     if (!oldest.waitingForCache) {
-        // For stores: only send if ready (committed)
-        // For loads: only send if not satisfied by forwarding
+        // For stores: send if ready (committed)
+        // For loads: send if not satisfied by forwarding
         if ((oldest.request.type == CpuFIFO::REQTYPE::WRITE && oldest.ready) ||
             (oldest.request.type == CpuFIFO::REQTYPE::READ && !oldest.ready)) {
             
-            oldest.waitingForCache = true;
+            oldest.waitingForCache = true;  // Mark as waiting for both loads and stores
             m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
             std::cout << "[LSQ] Pushed oldest " 
-                      << (oldest.request.type == CpuFIFO::REQTYPE::READ ? "load " : "store ")
-                      << oldest.request.msgId << " to cache" << std::endl;
+                      << (oldest.request.type == CpuFIFO::REQTYPE::READ ? "load" : "store")
+                      << " " << oldest.request.msgId << " to cache" << std::endl;
         }
     }
 }
