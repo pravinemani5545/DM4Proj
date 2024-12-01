@@ -386,35 +386,32 @@ namespace ns3 {
      * 2. LSQ operations
      * 3. Processing TX and RX buffers
      */
-    void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
-        std::cout << "\n[CPU] ========== Cycle " << cpuCoreGenerator->m_cpuCycle << " ==========" << std::endl;
-        
-        // Update ROB cycle
-        if (cpuCoreGenerator->m_rob) {
-            cpuCoreGenerator->m_rob->setCycle(cpuCoreGenerator->m_cpuCycle);
-            cpuCoreGenerator->m_rob->step();
-        }
-        
-        // Update LSQ cycle
-        if (cpuCoreGenerator->m_lsq) {
-            cpuCoreGenerator->m_lsq->setCycle(cpuCoreGenerator->m_cpuCycle);
-            cpuCoreGenerator->m_lsq->step();
-            
-            // First handle any cache responses
-            if (cpuCoreGenerator->m_cpuFIFO && !cpuCoreGenerator->m_cpuFIFO->m_rxFIFO.IsEmpty()) {
-                cpuCoreGenerator->m_lsq->rxFromCache();
-            }
-            
-            // Then try to send stores to cache
-            if (cpuCoreGenerator->m_cpuFIFO && !cpuCoreGenerator->m_cpuFIFO->m_txFIFO.IsFull()) {
-                cpuCoreGenerator->m_lsq->pushToCache();
-            }
-        }
-        
-        // Process new instructions
-        cpuCoreGenerator->ProcessTxBuf();
-        cpuCoreGenerator->ProcessRxBuf();
+void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
+    std::cout << "\n[CPU] ========== Cycle " << cpuCoreGenerator->m_cpuCycle << " ==========" << std::endl;
+
+    // Update ROB cycle
+    if (cpuCoreGenerator->m_rob) {
+        cpuCoreGenerator->m_rob->setCycle(cpuCoreGenerator->m_cpuCycle);
+        cpuCoreGenerator->m_rob->step();
     }
+
+    // Update LSQ cycle
+    if (cpuCoreGenerator->m_lsq) {
+        cpuCoreGenerator->m_lsq->setCycle(cpuCoreGenerator->m_cpuCycle);
+        cpuCoreGenerator->m_lsq->step();  // rxFromCache is handled in LSQ::step()
+
+        // Try to send stores to cache
+        if (cpuCoreGenerator->m_cpuFIFO && !cpuCoreGenerator->m_cpuFIFO->m_txFIFO.IsFull()) {
+            cpuCoreGenerator->m_lsq->pushToCache();
+        }
+    }
+
+    // Process new instructions
+    cpuCoreGenerator->ProcessTxBuf();
+    cpuCoreGenerator->ProcessRxBuf();
+}
+
+
 
     void CpuCoreGenerator::onInstructionRetired(const CpuFIFO::ReqMsg& request) {
         m_sent_requests--;  // Decrement in-flight count

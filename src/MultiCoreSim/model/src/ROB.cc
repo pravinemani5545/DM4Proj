@@ -78,58 +78,66 @@ bool ROB::allocate(const CpuFIFO::ReqMsg& request) {
 }
 
 void ROB::retire() {
+    // Log current ROB state
     std::cout << "[ROB] Retire check - Queue contents:" << std::endl;
     for (size_t i = 0; i < m_rob_q.size(); i++) {
         const ROBEntry& entry = m_rob_q[i];
-        std::cout << "[ROB] Position " << i 
+        std::cout << "[ROB] Position " << i
                   << " msgId=" << entry.request.msgId
                   << " type=" << (int)entry.request.type
-                  << " ready=" << entry.ready
-                  << " cycle=" << entry.allocate_cycle << std::endl;
+                  << " ready=" << (entry.ready ? "Yes" : "No")
+                  << " allocate_cycle=" << entry.allocate_cycle
+                  << std::endl;
     }
-    
+
     if (m_rob_q.empty()) {
         std::cout << "[ROB] Cannot retire - queue empty" << std::endl;
         return;
     }
-    
-    uint32_t retired = 0;
+
+    uint32_t retired = 0; // Track number of instructions retired in this cycle
     while (!m_rob_q.empty() && retired < IPC) {
-        std::cout << "[ROB] Retire conditions: !empty=" << (!m_rob_q.empty()) 
-                  << " retired<IPC=" << (retired < IPC) 
-                  << " head.ready=" << m_rob_q.front().ready
-                  << " head.type=" << (int)m_rob_q.front().request.type
-                  << " head.msgId=" << m_rob_q.front().request.msgId
+        // Log current retirement conditions
+        const ROBEntry& head = m_rob_q.front();
+        std::cout << "[ROB] Retire conditions:"
+                  << " !empty=" << (!m_rob_q.empty())
+                  << " retired<IPC=" << (retired < IPC)
+                  << " head.ready=" << (head.ready ? "Yes" : "No")
+                  << " head.msgId=" << head.request.msgId
+                  << " head.type=" << (int)head.request.type
                   << std::endl;
-                  
-        ROBEntry& head = m_rob_q.front();
+
         if (!head.ready) {
-            std::cout << "[ROB] Stopping - head not ready" << std::endl;
-            break;
+            std::cout << "[ROB] Stopping retirement - head not ready" << std::endl;
+            break; // Stop retiring if the head instruction is not ready
         }
-        
+
+        // Retire the head instruction
         m_rob_q.erase(m_rob_q.begin());
         m_num_entries--;
         retired++;
+
+        std::cout << "[ROB] Retired instruction msgId=" << head.request.msgId << std::endl;
     }
-    
+
     if (retired > 0) {
-        std::cout << "[ROB] Retired " << retired << " instructions" << std::endl;
+        std::cout << "[ROB] Successfully retired " << retired << " instructions this cycle" << std::endl;
+    } else {
+        std::cout << "[ROB] No instructions retired this cycle" << std::endl;
     }
 }
 
+
 void ROB::commit(uint64_t requestId) {
-    std::cout << "[ROB] Attempting to commit request " << requestId << std::endl;
-    
     for (auto& entry : m_rob_q) {
         if (entry.request.msgId == requestId) {
             entry.ready = true;
-            std::cout << "[ROB] Marked request " << requestId << " as ready" << std::endl;
+            std::cout << "[ROB] Committed request msgId=" << requestId << " as ready" << std::endl;
             return;
         }
     }
-    
-    std::cout << "[ROB] Warning: Request " << requestId << " not found for commit" << std::endl;
+    std::cout << "[ROB] Warning: Request " << requestId << " not found" << std::endl;
 }
+
 
 } // namespace ns3
