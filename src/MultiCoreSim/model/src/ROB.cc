@@ -15,7 +15,7 @@ ROB::~ROB() {}
 
 void ROB::step() {
     // Add cycle limit check
-    if (m_current_cycle >= 400) {
+    if (m_current_cycle >= 200) {
         std::cout << "\n[ROB] ========== Final state at cycle limit (200) ==========" << std::endl;
         std::cout << "[ROB] Final ROB state:" << std::endl;
         std::cout << "[ROB] Current entries: " << m_num_entries << "/" << MAX_ENTRIES << std::endl;
@@ -95,7 +95,6 @@ void ROB::retire() {
     
     uint32_t retired = 0;
     while (!m_rob_q.empty() && retired < IPC) {
-        // Debug print both conditions
         std::cout << "[ROB] Retire conditions: !empty=" << (!m_rob_q.empty()) 
                   << " retired<IPC=" << (retired < IPC) 
                   << " head.ready=" << m_rob_q.front().ready
@@ -107,10 +106,6 @@ void ROB::retire() {
         if (!head.ready) {
             std::cout << "[ROB] Stopping - head not ready" << std::endl;
             break;
-        }
-        
-        if (head.request.type == CpuFIFO::REQTYPE::WRITE && m_lsq) {
-            m_lsq->commit(head.request.msgId);
         }
         
         m_rob_q.erase(m_rob_q.begin());

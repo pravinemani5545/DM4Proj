@@ -107,37 +107,23 @@ bool LSQ::ldFwd(uint64_t address) {
 }
 
 void LSQ::pushToCache() {
-    std::cout << "[LSQ] pushToCache check - FIFO exists=" << (m_cpuFIFO != nullptr)
-              << " isFull=" << (m_cpuFIFO ? m_cpuFIFO->m_txFIFO.IsFull() : true) << std::endl;
-              
-    for (auto& entry : m_lsq_q) {
-        std::cout << "[LSQ] Entry " << entry.request.msgId 
-                  << " type=" << (entry.request.type == CpuFIFO::REQTYPE::READ ? "LOAD" : "STORE")
-                  << " ready=" << entry.ready
-                  << " waitingForCache=" << entry.waitingForCache
-                  << " addr=0x" << std::hex << entry.request.addr << std::dec << std::endl;
-    }
-    
     if (m_lsq_q.empty() || !m_cpuFIFO || m_cpuFIFO->m_txFIFO.IsFull()) {
         return;
     }
     
-    // Find oldest operation that needs to go to cache
-    for (auto& entry : m_lsq_q) {
-        // Skip if already waiting for cache
-        if (entry.waitingForCache) continue;
-        
+    // Always check oldest entry first (front of queue)
+    auto& oldest = m_lsq_q.front();
+    if (!oldest.waitingForCache) {
         // For stores: only send if ready (committed)
         // For loads: only send if not satisfied by forwarding
-        if ((entry.request.type == CpuFIFO::REQTYPE::WRITE && entry.ready) ||
-            (entry.request.type == CpuFIFO::REQTYPE::READ && !entry.ready)) {
+        if ((oldest.request.type == CpuFIFO::REQTYPE::WRITE && oldest.ready) ||
+            (oldest.request.type == CpuFIFO::REQTYPE::READ && !oldest.ready)) {
             
-            entry.waitingForCache = true;
-            m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
+            oldest.waitingForCache = true;
+            m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
             std::cout << "[LSQ] Pushed oldest " 
-                      << (entry.request.type == CpuFIFO::REQTYPE::READ ? "load " : "store ")
-                      << entry.request.msgId << " to cache" << std::endl;
-            break;  // Only send one request per cycle
+                      << (oldest.request.type == CpuFIFO::REQTYPE::READ ? "load " : "store ")
+                      << oldest.request.msgId << " to cache" << std::endl;
         }
     }
 }
@@ -150,27 +136,20 @@ void LSQ::rxFromCache() {
     
     auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
     std::cout << "[LSQ] Processing cache response msgId=" << response.msgId 
-              << " addr=0x" << std::hex << response.addr << std::dec 
-              << " type=" << (int)response.type << std::endl;
+              << " addr=0x" << std::hex << response.addr << std::dec << std::endl;
+    
+    m_cpuFIFO->m_rxFIFO.PopElement();
     
     // Find matching request in LSQ
     for (auto& entry : m_lsq_q) {
         if (entry.request.msgId == response.msgId) {
-            // As per 3.3.3 case 1: Load commits when data comes back from memory
             if (entry.request.type == CpuFIFO::REQTYPE::READ) {
                 entry.ready = true;
-                std::cout << "[LSQ] Load data received from memory, marking ready" << std::endl;
                 if (m_rob) {
                     m_rob->commit(entry.request.msgId);
                 }
-                
-                // After receiving load data, check if any other loads can be forwarded
-                ldFwd(entry.request.addr);
-            } 
-            // For stores, just mark that cache has acknowledged the write
-            else {
+            } else {
                 entry.cache_ack = true;
-                std::cout << "[LSQ] Store write acknowledged by cache" << std::endl;
             }
             break;
         }
@@ -204,29 +183,6 @@ void LSQ::retire() {
             ++it;
         }
     }
-}
-
-void LSQ::commit(uint64_t requestId) {
-    std::cout << "[LSQ] Processing commit for request " << requestId << std::endl;
-    
-    for (auto& entry : m_lsq_q) {
-        if (entry.request.msgId == requestId) {
-            if (entry.request.type == CpuFIFO::REQTYPE::WRITE) {
-                if (entry.cache_ack) {
-                    // Store has been written to cache, can be removed
-                    std::cout << "[LSQ] Store " << requestId 
-                              << " committed and written to cache" << std::endl;
-                } else {
-                    // Need to write store to cache
-                    std::cout << "[LSQ] Store " << requestId 
-                              << " committed but waiting for cache write" << std::endl;
-                }
-            }
-            return;
-        }
-    }
-    
-    std::cout << "[LSQ] Warning: Request " << requestId << " not found for commit" << std::endl;
 }
 
 } // namespace ns3

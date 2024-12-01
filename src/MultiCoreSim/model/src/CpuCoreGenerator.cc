@@ -252,21 +252,12 @@ namespace ns3 {
                   << m_cpuFIFO->m_rxFIFO.IsEmpty() << std::endl;
                   
         if (!m_cpuFIFO->m_rxFIFO.IsEmpty()) {
-            std::cout << "[CPU] Found response in rxFIFO" << std::endl;
-            m_cpuMemResp = m_cpuFIFO->m_rxFIFO.GetFrontElement();
-            m_cpuFIFO->m_rxFIFO.PopElement();
-            m_sent_requests--;
-            
-            if (m_rob) {
-                m_rob->commit(m_cpuMemResp.msgId);
-            }
+            // Let LSQ handle the response - it will remove it from FIFO
             if (m_lsq) {
-                m_lsq->commit(m_cpuMemResp.msgId);
+                m_lsq->rxFromCache();
             }
             
-            m_prevReqFinish = true;
-            m_prevReqFinishCycle = m_cpuCycle;
-            m_prevReqArriveCycle = m_cpuMemResp.reqcycle;
+            m_sent_requests--;
             m_cpuRespCnt++;
         }
         
@@ -298,21 +289,20 @@ namespace ns3 {
             return;
         }
 
-        // Update ROB cycle
+        // First handle ROB and LSQ
         if (cpuCoreGenerator->m_rob) {
             cpuCoreGenerator->m_rob->setCycle(cpuCoreGenerator->m_cpuCycle);
             cpuCoreGenerator->m_rob->step();
         }
         
-        // Update LSQ cycle
         if (cpuCoreGenerator->m_lsq) {
             cpuCoreGenerator->m_lsq->setCycle(cpuCoreGenerator->m_cpuCycle);
             cpuCoreGenerator->m_lsq->step();
         }
         
-        // Process new instructions and responses
-        cpuCoreGenerator->ProcessTxBuf();
-        cpuCoreGenerator->ProcessRxBuf();
+        // Handle responses before new requests
+        cpuCoreGenerator->ProcessRxBuf();  // First handle responses
+        cpuCoreGenerator->ProcessTxBuf();  // Then process new requests
     }
 }
 
