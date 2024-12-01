@@ -48,15 +48,10 @@ bool ROB::allocate(const CpuFIFO::ReqMsg& request) {
     ROBEntry entry;
     entry.request = request;
     entry.allocate_cycle = m_current_cycle;
-    entry.ready = false;
+    entry.ready = (request.type == CpuFIFO::REQTYPE::COMPUTE);
 
     m_rob_q.push_back(entry);
     m_num_entries++;
-
-    // Compute instructions commit (become ready) upon allocation per 3.3.1
-    if (request.type == CpuFIFO::REQTYPE::COMPUTE) {
-        commit(request.msgId);
-    }
 
     std::cout << "[ROB][ALLOC] SUCCESS - Entry allocated" << std::endl;
     std::cout << "[ROB][ALLOC] - Ready: " << (entry.ready ? "Yes" : "No") << std::endl;
