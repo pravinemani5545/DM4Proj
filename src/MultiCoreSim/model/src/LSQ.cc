@@ -1,5 +1,7 @@
 #include "../header/LSQ.h"
 #include "../header/ROB.h"
+#include <algorithm>
+#include <iostream>
 
 namespace ns3 {
 
@@ -109,16 +111,22 @@ void LSQ::pushToCache() {
         return;
     }
     
-    // Since m_lsq_q maintains program order (oldest at front),
-    // iterate from beginning to find oldest ready store
-    for (auto it = m_lsq_q.begin(); it != m_lsq_q.end(); ++it) {
-        if (it->request.type == CpuFIFO::REQTYPE::WRITE && 
-            it->ready && !it->waitingForCache) {
-            it->waitingForCache = true;
-            m_cpuFIFO->m_txFIFO.InsertElement(it->request);
-            std::cout << "[LSQ] Pushed oldest store " << it->request.msgId 
-                      << " to cache" << std::endl;
-            break;
+    // Find oldest operation that needs to go to cache
+    for (auto& entry : m_lsq_q) {
+        // Skip if already waiting for cache
+        if (entry.waitingForCache) continue;
+        
+        // For stores: only send if ready (committed)
+        // For loads: only send if not satisfied by forwarding
+        if ((entry.request.type == CpuFIFO::REQTYPE::WRITE && entry.ready) ||
+            (entry.request.type == CpuFIFO::REQTYPE::READ && !entry.ready)) {
+            
+            entry.waitingForCache = true;
+            m_cpuFIFO->m_txFIFO.InsertElement(entry.request);
+            std::cout << "[LSQ] Pushed oldest " 
+                      << (entry.request.type == CpuFIFO::REQTYPE::READ ? "load " : "store ")
+                      << entry.request.msgId << " to cache" << std::endl;
+            break;  // Only send one request per cycle
         }
     }
 }
