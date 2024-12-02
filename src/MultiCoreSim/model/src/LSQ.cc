@@ -17,19 +17,22 @@ LSQ::LSQ()
 LSQ::~LSQ() {}
 
 void LSQ::step() {
-    std::cout << "\n[LSQ] Step at cycle " << m_current_cycle << std::endl;
-
-    // Push to cache
-    pushToCache();
-
-    // Handle cache responses
+    std::cout << "\n[LSQ][STEP] ========== Begin Cycle " << m_current_cycle << " ==========" << std::endl;
+    
+    // 1. Process cache responses first
+    std::cout << "[LSQ][STEP] Processing cache responses" << std::endl;
     rxFromCache();
-
-    // Retire completed operations
+    
+    // 2. Remove completed entries
+    std::cout << "[LSQ][STEP] Removing completed entries" << std::endl;
     retire();
-
-    // Increment cycle tracking
+    
+    // 3. Send new requests to cache
+    std::cout << "[LSQ][STEP] Sending new requests to cache" << std::endl;
+    pushToCache();
+    
     m_current_cycle++;
+    std::cout << "[LSQ][STEP] ========== End Cycle " << m_current_cycle << " ==========\n" << std::endl;
 }
 
 bool LSQ::canAccept() {
@@ -103,7 +106,6 @@ void LSQ::commit(uint64_t requestId) {
     }
 }
 
-
 bool LSQ::ldFwd(uint64_t address) {
     std::cout << "\n[LSQ][FORWARD] ========== Store-to-Load Forward Check ==========" << std::endl;
     std::cout << "[LSQ][FORWARD] Checking for store to address 0x" << std::hex << address << std::dec << std::endl;
@@ -141,166 +143,134 @@ bool LSQ::ldFwd(uint64_t address) {
 }
 
 void LSQ::pushToCache() {
-    std::cout << "\n[LSQ][PUSH] ========== Push To Cache ==========" << std::endl;
+    std::cout << "\n[LSQ][PUSH] ========== Push To Cache Check ==========" << std::endl;
     
-    if (m_lsq_q.empty() || !m_cpuFIFO || m_cpuFIFO->m_txFIFO.IsFull()) {
+    if (m_lsq_q.empty()) {
+        std::cout << "[LSQ][PUSH] LSQ empty - nothing to push" << std::endl;
+        return;
+    }
+    
+    if (!m_cpuFIFO) {
+        std::cout << "[LSQ][PUSH] No CPU FIFO connected" << std::endl;
+        return;
+    }
+    
+    if (m_cpuFIFO->m_txFIFO.IsFull()) {
+        std::cout << "[LSQ][PUSH] TX FIFO full - cannot push" << std::endl;
         return;
     }
 
-    // Check if any older entries are waiting for cache
-    for (const auto& entry : m_lsq_q) {
-        if (entry.waitingForCache) {
-            return;  // Maintain memory ordering
-        }
-        if (&entry == &m_lsq_q.front()) break;
+    auto& oldest = m_lsq_q.front();
+    std::cout << "[LSQ][PUSH] Checking oldest entry:" << std::endl;
+    std::cout << "[LSQ][PUSH] - ID: " << oldest.request.msgId << std::endl;
+    std::cout << "[LSQ][PUSH] - Type: " << (oldest.request.type == CpuFIFO::REQTYPE::READ ? "LOAD" : "STORE") << std::endl;
+    std::cout << "[LSQ][PUSH] - Address: 0x" << std::hex << oldest.request.addr << std::dec << std::endl;
+    std::cout << "[LSQ][PUSH] - Ready: " << (oldest.ready ? "Yes" : "No") << std::endl;
+    std::cout << "[LSQ][PUSH] - Waiting for Cache: " << (oldest.waitingForCache ? "Yes" : "No") << std::endl;
+    
+    if (oldest.waitingForCache) {
+        std::cout << "[LSQ][PUSH] Entry already waiting for cache" << std::endl;
+        return;
     }
 
-    auto& oldest = m_lsq_q.front();
-    if (!oldest.waitingForCache) {
-        // For writes: send if ready (committed to ROB)
-        // For reads: send if not ready (needs memory access)
-        if ((oldest.request.type == CpuFIFO::REQTYPE::WRITE && oldest.ready) ||
-            (oldest.request.type == CpuFIFO::REQTYPE::READ && !oldest.ready)) {
-                
-            if (!m_cpuFIFO->m_txFIFO.IsFull()) {
-                m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
-                oldest.waitingForCache = true;
-            }
-        }
+    bool should_push = false;
+    if (oldest.request.type == CpuFIFO::REQTYPE::WRITE) {
+        // Stores: always push to cache regardless of ready state
+        should_push = true;
+        std::cout << "[LSQ][PUSH] Store operation - will push to cache" << std::endl;
+    } else {
+        // Loads: only push if not ready (needs memory access)
+        should_push = !oldest.ready;
+        std::cout << "[LSQ][PUSH] Load operation - " << (should_push ? "needs cache access" : "already ready (forwarded)") << std::endl;
+    }
+    
+    if (should_push) {
+        std::cout << "[LSQ][PUSH] Pushing request to cache:" << std::endl;
+        std::cout << "[LSQ][PUSH] - ID: " << oldest.request.msgId << std::endl;
+        std::cout << "[LSQ][PUSH] - Type: " << (oldest.request.type == CpuFIFO::REQTYPE::READ ? "LOAD" : "STORE") << std::endl;
+        std::cout << "[LSQ][PUSH] - Address: 0x" << std::hex << oldest.request.addr << std::dec << std::endl;
+        
+        m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
+        oldest.waitingForCache = true;
+        std::cout << "[LSQ][PUSH] Request sent to cache, marked as waiting" << std::endl;
+    } else {
+        std::cout << "[LSQ][PUSH] No need to push to cache" << std::endl;
     }
 }
 
-
-
-
 void LSQ::rxFromCache() {
+    std::cout << "\n[LSQ][RX] ========== Processing Cache Response ==========" << std::endl;
+    
     if (!m_cpuFIFO || m_cpuFIFO->m_rxFIFO.IsEmpty()) {
+        std::cout << "[LSQ][RX] No cache response available" << std::endl;
         return;
     }
 
     auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
     m_cpuFIFO->m_rxFIFO.PopElement();
+    
+    std::cout << "[LSQ][RX] Processing response for msgId=" << response.msgId 
+              << ", addr=0x" << std::hex << response.addr << std::dec << std::endl;
 
-    // First pass: Handle the specific response
     for (auto& entry : m_lsq_q) {
         if (entry.request.msgId == response.msgId) {
+            std::cout << "[LSQ][RX] Found matching entry" << std::endl;
             entry.waitingForCache = false;  // Clear waiting state
             
             if (entry.request.type == CpuFIFO::REQTYPE::READ) {
                 entry.ready = true;  // Mark load as ready
+                std::cout << "[LSQ][RX] Load marked ready, committing to ROB" << std::endl;
                 if (m_rob) {
                     m_rob->commit(entry.request.msgId);
                 }
             } else {
                 entry.cache_ack = true;  // Mark store as acknowledged
+                std::cout << "[LSQ][RX] Store marked as acknowledged by cache" << std::endl;
             }
             break;
         }
     }
+    
+    std::cout << "[LSQ][RX] ========== Cache Response Processing Complete ==========\n" << std::endl;
 }
 
-
-
-// void LSQ::rxFromCache() {
-//     std::cout << "[LSQ] rxFromCache check - FIFO exists=" << (m_cpuFIFO != nullptr) 
-//               << ", isEmpty=" << (m_cpuFIFO ? m_cpuFIFO->m_rxFIFO.IsEmpty() : true) << std::endl;
-
-//     if (!m_cpuFIFO || m_cpuFIFO->m_rxFIFO.IsEmpty()) {
-//         std::cout << "[LSQ] No cache response available" << std::endl;
-//         return;
-//     }
-
-//     // Fetch the cache response
-//     auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
-//     std::cout << "[LSQ] Processing cache response msgId=" << response.msgId 
-//               << ", addr=0x" << std::hex << response.addr << std::dec 
-//               << std::endl;
-
-//     // Remove the response from the FIFO
-//     m_cpuFIFO->m_rxFIFO.PopElement();
-
-//     // Find matching request in LSQ
-//     bool found = false;
-//     for (auto& entry : m_lsq_q) {
-//         if (entry.request.msgId == response.msgId) {
-//             found = true;
-//             std::cout << "[LSQ] Found matching request in LSQ for msgId=" << response.msgId << std::endl;
-
-//             if (entry.request.type == CpuFIFO::REQTYPE::READ) {
-//                 entry.ready = true;
-//                 std::cout << "[LSQ] Marking load request " << response.msgId << " as ready" << std::endl;
-//                 if (m_rob) {
-//                     m_rob->commit(entry.request.msgId);
-//                 }
-//             } else if (entry.request.type == CpuFIFO::REQTYPE::WRITE) {
-//                 entry.cache_ack = true;
-//                 std::cout << "[LSQ] Marking store request " << response.msgId << " as acknowledged" << std::endl;
-//             }
-//             break;
-//         }
-//     }
-
-//     if (!found) {
-//         std::cout << "[LSQ] No matching request in LSQ for response msgId=" << response.msgId << std::endl;
-//     }
-// }
-
-
-// void LSQ::rxFromCache() {
-//     std::cout << "[LSQ] rxFromCache check - FIFO exists=" << (m_cpuFIFO != nullptr) 
-//               << ", isEmpty=" << (m_cpuFIFO ? m_cpuFIFO->m_rxFIFO.IsEmpty() : true) << std::endl;
-
-//     if (!m_cpuFIFO || m_cpuFIFO->m_rxFIFO.IsEmpty()) {
-//         std::cout << "[LSQ] No cache response available" << std::endl;
-//         return;
-//     }
-
-//     // Fetch the cache response
-//     auto response = m_cpuFIFO->m_rxFIFO.GetFrontElement();
-//     std::cout << "[LSQ] Processing cache response msgId=" << response.msgId 
-//               << ", addr=0x" << std::hex << response.addr << std::dec 
-//               << std::endl;
-
-//     // Remove the response from the FIFO
-//     m_cpuFIFO->m_rxFIFO.PopElement();
-
-//     // Find matching request in LSQ
-//     for (auto& entry : m_lsq_q) {
-//         if (entry.request.msgId == response.msgId) {
-//             std::cout << "[LSQ] Found matching request in LSQ for msgId=" << response.msgId << std::endl;
-
-//             if (entry.request.type == CpuFIFO::REQTYPE::READ) {
-//                 entry.ready = true;
-//                 std::cout << "[LSQ] Marking load request " << response.msgId << " as ready" << std::endl;
-//                 if (m_rob) {
-//                     m_rob->commit(entry.request.msgId);
-//                 }
-//             } else if (entry.request.type == CpuFIFO::REQTYPE::WRITE) {
-//                 entry.cache_ack = true;
-//                 std::cout << "[LSQ] Marking store request " << response.msgId << " as acknowledged" << std::endl;
-//             }
-//             break;
-//         }
-//     }
-// }
-
-
 void LSQ::retire() {
-    for (auto it = m_lsq_q.begin(); it != m_lsq_q.end(); ++it) {
+    std::cout << "\n[LSQ][RETIRE] ========== LSQ Entry Removal Check ==========" << std::endl;
+    std::cout << "[LSQ][RETIRE] Current LSQ state: " << m_num_entries << " entries" << std::endl;
+    
+    auto it = m_lsq_q.begin();
+    while (it != m_lsq_q.end()) {
+        std::cout << "[LSQ][RETIRE] Checking entry:" << std::endl;
+        std::cout << "[LSQ][RETIRE] - ID: " << it->request.msgId << std::endl;
+        std::cout << "[LSQ][RETIRE] - Type: " << (it->request.type == CpuFIFO::REQTYPE::READ ? "LOAD" : "STORE") << std::endl;
+        std::cout << "[LSQ][RETIRE] - Address: 0x" << std::hex << it->request.addr << std::dec << std::endl;
+        std::cout << "[LSQ][RETIRE] - Ready: " << (it->ready ? "Yes" : "No") << std::endl;
+        std::cout << "[LSQ][RETIRE] - Cache Ack: " << (it->cache_ack ? "Yes" : "No") << std::endl;
+        std::cout << "[LSQ][RETIRE] - Waiting for Cache: " << (it->waitingForCache ? "Yes" : "No") << std::endl;
+        
         bool can_remove = false;
         
         if (it->request.type == CpuFIFO::REQTYPE::READ) {
-            can_remove = it->ready;  // Loads retire when ready
+            can_remove = it->ready;  // Loads remove when ready (Section 3.4.1)
+            std::cout << "[LSQ][RETIRE] Load removal check - ready=" << (it->ready ? "Yes" : "No") << std::endl;
         } else {
-            can_remove = it->cache_ack;  // Stores retire when acknowledged
+            can_remove = it->cache_ack;  // Stores remove when cache acknowledges (Section 3.4.1)
+            std::cout << "[LSQ][RETIRE] Store removal check - cache_ack=" << (it->cache_ack ? "Yes" : "No") << std::endl;
         }
         
         if (can_remove) {
+            std::cout << "[LSQ][RETIRE] Removing entry " << it->request.msgId << std::endl;
             it = m_lsq_q.erase(it);
             m_num_entries--;
-            if (it == m_lsq_q.end()) break;
+            std::cout << "[LSQ][RETIRE] LSQ now has " << m_num_entries << " entries" << std::endl;
+        } else {
+            std::cout << "[LSQ][RETIRE] Keeping entry " << it->request.msgId << " - conditions not met" << std::endl;
+            ++it;
         }
     }
+    
+    std::cout << "[LSQ][RETIRE] ========== Entry Removal Complete ==========" << std::endl;
+    std::cout << "[LSQ][RETIRE] Final LSQ state: " << m_num_entries << " entries" << std::endl;
 }
 
 } // namespace ns3

@@ -357,7 +357,7 @@ namespace ns3 {
      * 3. Processing TX and RX buffers
      */
 void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
-    std::cout << "\n[CPU][STEP] ==================== BEGIN CYCLE " << cpuCoreGenerator->m_cpuCycle << " ====================" << std::endl;
+    std::cout << "\n[CPU][STEP] ========== BEGIN CYCLE " << cpuCoreGenerator->m_cpuCycle << " ==========" << std::endl;
     
     // Add 30-cycle limit check
     if (cpuCoreGenerator->m_cpuCycle >= 30) {
@@ -371,25 +371,27 @@ void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
               << " ReqCount=" << cpuCoreGenerator->m_cpuReqCnt 
               << " RespCount=" << cpuCoreGenerator->m_cpuRespCnt << std::endl;
 
-    // Update ROB cycle
+    // 1. Process cache responses first - sets ready flags
+    std::cout << "[CPU][STEP] Processing cache responses" << std::endl;
+    cpuCoreGenerator->ProcessRxBuf();
+    
+    // 2. ROB step (includes retirement) - retires ready instructions in order
     if (cpuCoreGenerator->m_rob) {
-        std::cout << "[CPU][STEP] Updating ROB cycle to " << cpuCoreGenerator->m_cpuCycle << std::endl;
+        std::cout << "[CPU][STEP] ROB step - retiring ready instructions" << std::endl;
         cpuCoreGenerator->m_rob->setCycle(cpuCoreGenerator->m_cpuCycle);
         cpuCoreGenerator->m_rob->step();
     }
-
-    // Update LSQ cycle
+    
+    // 3. LSQ step (includes removal) - removes completed entries
     if (cpuCoreGenerator->m_lsq) {
-        std::cout << "[CPU][STEP] Updating LSQ cycle to " << cpuCoreGenerator->m_cpuCycle << std::endl;
+        std::cout << "[CPU][STEP] LSQ step - removing completed entries" << std::endl;
         cpuCoreGenerator->m_lsq->setCycle(cpuCoreGenerator->m_cpuCycle);
         cpuCoreGenerator->m_lsq->step();
     }
-
-    // Process new instructions and responses
-    std::cout << "[CPU][STEP] Starting ProcessTxBuf" << std::endl;
+    
+    // 4. Process new instructions last
+    std::cout << "[CPU][STEP] Processing new instructions" << std::endl;
     cpuCoreGenerator->ProcessTxBuf();
-    std::cout << "[CPU][STEP] Starting ProcessRxBuf" << std::endl;
-    cpuCoreGenerator->ProcessRxBuf();
     
     // Check simulation state before incrementing cycle
     std::cout << "[CPU][STEP] Pre-increment state:" << std::endl;
@@ -400,7 +402,7 @@ void CpuCoreGenerator::Step(Ptr<CpuCoreGenerator> cpuCoreGenerator) {
     std::cout << "[CPU][STEP] - New sample ready: " << (cpuCoreGenerator->m_newSampleRdy ? "Yes" : "No") << std::endl;
     std::cout << "[CPU][STEP] - Simulation done: " << (cpuCoreGenerator->m_cpuCoreSimDone ? "Yes" : "No") << std::endl;
     
-    // Always increment cycle at end of step
+    // 5. Increment cycle
     cpuCoreGenerator->m_cpuCycle++;
     std::cout << "[CPU][STEP] Incremented cycle to " << cpuCoreGenerator->m_cpuCycle << std::endl;
     
