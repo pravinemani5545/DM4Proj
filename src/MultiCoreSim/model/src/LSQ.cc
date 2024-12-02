@@ -190,9 +190,13 @@ void LSQ::pushToCache() {
         std::cout << "[LSQ][PUSH] - Type: " << (oldest.request.type == CpuFIFO::REQTYPE::READ ? "LOAD" : "STORE") << std::endl;
         std::cout << "[LSQ][PUSH] - Address: 0x" << std::hex << oldest.request.addr << std::dec << std::endl;
         
+        // Set cycle field to enable cache response path
+        oldest.request.cycle = m_current_cycle;
+        oldest.request.fifoInserionCycle = m_current_cycle;
+        
         m_cpuFIFO->m_txFIFO.InsertElement(oldest.request);
         oldest.waitingForCache = true;
-        std::cout << "[LSQ][PUSH] Request sent to cache, marked as waiting" << std::endl;
+        std::cout << "[LSQ][PUSH] Request sent to cache at cycle " << m_current_cycle << ", marked as waiting" << std::endl;
     } else {
         std::cout << "[LSQ][PUSH] No need to push to cache" << std::endl;
     }
