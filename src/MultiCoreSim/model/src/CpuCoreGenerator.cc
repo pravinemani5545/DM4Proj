@@ -185,7 +185,7 @@ namespace ns3 {
                 
                 // Create compute instruction request
                 CpuFIFO::ReqMsg compute_req;
-                compute_req.msgId = m_cpuReqCnt++;
+                compute_req.msgId = IdGenerator::nextReqId();
                 compute_req.reqCoreId = m_coreId;
                 compute_req.type = CpuFIFO::REQTYPE::COMPUTE;
                 compute_req.addr = 0;  // Special value for compute
@@ -241,19 +241,15 @@ namespace ns3 {
                     m_remaining_compute = compute_count;
                     std::cout << "[CPU] Found " << compute_count << " compute instructions" << std::endl;
                     
-                    // If we have compute instructions, handle them first
-                    if (compute_count > 0) {
-                        return;  // Process compute instructions next cycle
-                    }
-                    
                     // Otherwise setup memory request if present
                     if (type == "R" || type == "W") {
-                        m_cpuMemReq.msgId = m_cpuReqCnt++;
+                        m_cpuMemReq.msgId = IdGenerator::nextReqId();
+                        m_cpuReqCnt++;
                         m_cpuMemReq.reqCoreId = m_coreId;
                         m_cpuMemReq.addr = addr;
                         m_cpuMemReq.cycle = m_cpuCycle;
                         m_cpuMemReq.ready = false;
-                        
+
                         if (type == "R") {
                             m_cpuMemReq.type = CpuFIFO::REQTYPE::READ;
                             std::cout << "[CPU] Parsed LOAD: addr=" << addr 
@@ -275,14 +271,6 @@ namespace ns3 {
             else {
                 m_cpuReqDone = true;
                 std::cout << "[CPU] Reached end of trace file" << std::endl;
-                // // Halt for debugging purposes
-                if (m_cpuCycle > 50) {
-                    std::cout << "Halting..." << std::endl;
-                    int x = 0;
-                    while(true) {
-                        x = 1 + 1;
-                    }
-                }
             }
         }
         
@@ -356,7 +344,8 @@ namespace ns3 {
             m_cpuRespCnt++;
         }
         
-        if (m_cpuReqDone && m_cpuRespCnt >= m_cpuReqCnt) {
+        // if (m_cpuReqDone && m_cpuRespCnt >= m_cpuReqCnt) {
+        if (m_cpuReqDone) {
             m_cpuCoreSimDone = true;
             Logger::getLogger()->traceEnd(m_coreId);
             std::cout << "\n[CPU] Core " << m_coreId << " simulation complete at cycle " 
@@ -393,9 +382,6 @@ namespace ns3 {
             cpuCoreGenerator->m_lsq->setCycle(cpuCoreGenerator->m_cpuCycle);
             cpuCoreGenerator->m_lsq->step();
 
-            if (cpuCoreGenerator->m_lsq->isEmpty()) {
-                cpuCoreGenerator->m_sent_requests = 0;
-            }
             
         }
         

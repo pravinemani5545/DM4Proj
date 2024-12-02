@@ -13,6 +13,7 @@
 #include "ns3/ptr.h"
 #include "ns3/core-module.h"
 #include "MemTemplate.h"
+#include "IdGenerator.h"
 #include "ROB.h"
 #include "LSQ.h"
 #include <fstream>

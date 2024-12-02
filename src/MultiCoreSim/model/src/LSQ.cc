@@ -20,7 +20,7 @@ void LSQ::step() {
     
     // As per 3.3, handle memory operations every cycle
     pushToCache();  // Try to send stores to cache
-    rxFromCache();  // Handle cache responses
+    // rxFromCache();  // Handle cache responses
     retire();       // Remove completed operations
 }
 
@@ -236,6 +236,19 @@ void LSQ::commit(uint64_t requestId) {
                 //     std::cout << "[LSQ] Store " << requestId 
                 //               << " committed but waiting for cache write" << std::endl;
                 // }
+            }
+            else if (entry.request.type == CpuFIFO::REQTYPE::READ) {
+                entry.ready = true;
+                std::cout << "[LSQ] Load data received from memory, marking ready" << std::endl;
+                if (m_rob) {
+                    m_rob->commit(entry.request.msgId);
+                }
+                
+                // After receiving load data, check if any other loads can be forwarded
+                ldFwd(entry.request.addr);
+            }
+            else {
+                std::cout << "Somehow a non read/write got in the LSQ" << std::endl;
             }
             return;
         }
